@@ -1,0 +1,33 @@
+1、数据库类型为MYSQL数据库；
+2、DATABASE：clock
+3、IP（请联系场馆戚经理获取当前部署的服务器IP）  端口：3306
+4、密码：123456
+5、视图表名： clock_view
+6、数据结构
+CREATE TABLE `clock` (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `build` varchar(255) CHARACTER SET gb18030 COLLATE gb18030_chinese_ci NOT NULL COMMENT '场馆楼栋',
+  `floor` varchar(255) CHARACTER SET gb18030 COLLATE gb18030_chinese_ci NOT NULL COMMENT '楼层区域',
+  `room` varchar(255) CHARACTER SET gb18030 COLLATE gb18030_chinese_ci NOT NULL COMMENT '房间地点',
+  `model` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '-' COMMENT '型号：-、DD54、DD56、DD34、DD36、DS54、DS56、DS34、DS36、DC56、DC36、MC400、MR400',
+  `mac` int NOT NULL COMMENT '屏号',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '-' COMMENT '状态：-、正常、离线、未注册',
+  `bright` char(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '-' COMMENT '亮度：-、1-5',
+  `volume` varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '-' COMMENT '音量：-, 0-10',
+  `link` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '-' COMMENT '音量：-, 1-8, 1-4: rs485, 5-6: pbus, 7: eth, 8: lora',
+  `update_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE
+)
+其中model字段值解释
+DD54	数字双面5英寸4位LED时钟
+DD56	数字双面5英寸6位LED时钟
+DD34	数字双面3英寸4位LED时钟
+DD36	数字双面3英寸6位LED时钟
+DS54	数字单面5英寸4位LED时钟
+DS56	数字单面5英寸6位LED时钟
+DS34	数字单面3英寸4位LED时钟
+DS36	数字单面3英寸6位LED时钟
+DC56	倒/正计时数字单面5英寸6位LED时钟
+DC36	倒/正计时数字单面3英寸6位LED时钟
+MC400	圆盘400机械时钟
+MR400	方形400机械时钟

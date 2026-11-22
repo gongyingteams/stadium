@@ -1,0 +1,448 @@
+/**
+ * API 基地址解析策略 (多终端配置一致性的关键)
+ *
+ * 1) 优先使用构建期注入的 VITE_API_BASE_URL (显式指定后端地址)
+ * 2) 未注入时使用【同源相对路径】 /api
+ *    - 开发态: Vite dev-server proxy 转发至本机后端 (见 vite.config.js server.proxy)
+ *    - 生产态: Nginx location /api/ 反向代理转发至后端 (见 dev.gongying.bond.conf)
+ *
+ * 绝对禁止把 http://localhost:8000 之类的本机地址烤死进产物包:
+ * 其它电脑的浏览器会去请求"自己电脑的 localhost:8000", 必然连接失败,
+ * 于是静默回退到本机 localStorage, 导致各终端 Logo / 品牌配置显示不一致。
+ */
+const resolveApiBaseUrl = () => {
+  const configured = (import.meta.env.VITE_API_BASE_URL || '').trim()
+  if (configured) return configured.replace(/\/+$/, '')
+  return '/api'
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
+
+// 后端连通性状态 (用于顶部"离线模式·配置未同步"提示, 避免同步失败被静默吞掉)
+let apiOnline = true
+const emitApiStatus = (online, message = '') => {
+  apiOnline = online
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('ibms-api-status', { detail: { online, message } }))
+  }
+}
+export const isApiOnline = () => apiOnline
+
+// 角色预设映射表 (用于脱机仿真演练)
+const MOCK_ROLES = {
+  admin: { role: 'admin', role_name: '系统管理员', display_name: '系统管理员 (Admin)' },
+  ops: { role: 'ops', role_name: '运维工程师', display_name: '运维工程师 (Ops)' },
+  operator: { role: 'operator', role_name: '现场操作员', display_name: '现场操作员 (Operator)' },
+  viewer: { role: 'viewer', role_name: '只读查看者', display_name: '赛事督察员 (Viewer)' }
+}
+
+/**
+ * 脱机仿真沙箱处理器
+ * 当后端服务未部署或本地离线未启动 PHP 时，自动提供真实结构响应
+ */
+function handleMockFallback(path, options = {}) {
+  console.warn(`[API Sandbox] 真实后端未连接，已自动启用脱机演练沙箱: ${path}`)
+
+  // 1. 登录仿真
+  if (path === '/auth/login') {
+    let body = {}
+    try {
+      body = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {})
+    } catch {
+      body = {}
+    }
+    const username = (body.username || 'admin').trim()
+    const roleInfo = MOCK_ROLES[username] || {
+      role: 'admin',
+      role_name: '特权操作员',
+      display_name: `${username} (演练)`
+    }
+
+    return {
+      access_token: 'mock_jwt_token_' + Date.now(),
+      token_type: 'bearer',
+      expires_in: 86400,
+      user: {
+        username: username,
+        display_name: roleInfo.display_name,
+        role: roleInfo.role,
+        role_name: roleInfo.role_name
+      }
+    }
+  }
+
+  // 2. 登出仿真
+  if (path === '/auth/logout') {
+    return { success: true, message: '已安全登出' }
+  }
+
+  // 3. 当前登录用户校验仿真
+  if (path === '/me') {
+    let savedUser = null
+    try {
+      savedUser = JSON.parse(localStorage.getItem('venue_current_user') || 'null')
+    } catch {
+      savedUser = null
+    }
+
+    const username = savedUser?.username || 'admin'
+    const roleInfo = MOCK_ROLES[username] || {
+      role: savedUser?.roleCode || 'admin',
+      role_name: savedUser?.roleName || '系统管理员',
+      display_name: savedUser?.displayName || '系统管理员'
+    }
+
+    return {
+      username: username,
+      display_name: roleInfo.display_name,
+      role: roleInfo.role,
+      role_name: roleInfo.role_name,
+      expires_at: Math.floor(Date.now() / 1000) + 86400
+    }
+  }
+
+  // 4. Mock 模式状态查询与切换
+  if (path === '/mock/status') {
+    return { enabled: true, mode: 'OFFLINE_SANDBOX' }
+  }
+
+  if (path === '/mock/toggle') {
+    let body = {}
+    try {
+      body = typeof options.body === 'string' ? JSON.parse(options.body) : {}
+    } catch {
+      body = {}
+    }
+    return { enabled: body.enabled ?? true, reason: body.reason || '脱机操作员切换' }
+  }
+
+  // 5. 告警与审计查询回退
+  if (path.startsWith('/audit')) {
+    return {
+      items: [
+        { id: 1, details: 'TRC-9A82FC1', username: 'admin', role: 'admin', ip: '192.168.1.108', event_type: 'CMD_EXEC', target: '自动升旗系统 (FLAG-01)', action: '下发【国歌升旗】指令 (速度: 0.2608 m/s, 历时: 46s)', result: 'SUCCESS', timestamp: '10:35:12' },
+        { id: 2, details: 'TRC-4C71B88', username: 'operator', role: 'operator', ip: '192.168.1.155', event_type: 'CMD_EXEC', target: '场地照明及控制系统', action: '切换【赛事模式】组合灯光 (照度: 2000 Lux)', result: 'SUCCESS', timestamp: '10:30:00' },
+        { id: 3, details: 'TRC-1D39A20', username: 'admin', role: 'admin', ip: '192.168.1.108', event_type: 'CONFIG_CHANGE', target: '扩声调音台 (Soundcraft)', action: '修改串口通信波特率 9600 -> 115200', result: 'SUCCESS', timestamp: '09:20:15' }
+      ]
+    }
+  }
+
+  if (path === '/alarms') {
+    return {
+      items: [
+        { id: 'ALM-101', level: 'EMERGENCY', source: '标准时钟子钟 CLK-HALL-06', title: '观众大厅数码子钟时间漂移过大', detail: '与北斗主母钟时钟偏差达到 1450ms (阈值 500ms)，可能引发检录时间不同步', created_at: '10:22:15', status: 'OPEN' },
+        { id: 'ALM-102', level: 'WARNING', source: '比赛池场地照明配电柜 B3', title: '配电箱回路B3瞬时过流波动', detail: '训练模式向赛事模式过渡时出现 14.2A 阶跃波动，现已进入自适应稳压', created_at: '10:15:32', status: 'CONFIRMED' },
+        { id: 'ALM-103', level: 'EMERGENCY', source: '跳水池水下摄像机 CAM-SUB-02', title: '水下高清视频流丢包率超过 15%', detail: 'RTSP 码流检测到关键帧延迟达 850ms，触发网络交换机光电转换器排查预警', created_at: '09:58:40', status: 'OPEN' },
+        { id: 'ALM-104', level: 'WARNING', source: 'Soundcraft Vi3000 数字调音台', title: '串口通讯心跳超时重试 (COM3/RS232)', detail: '主控制台下发场景音效切流指令时收到应答延迟 320ms，已自动启用备用总线重发成功', created_at: '09:40:18', status: 'PROCESSING' },
+        { id: 'ALM-105', level: 'INFO', source: '看台主摄像机 CAM-FIELD-01', title: 'RTSP流自愈重连完成', detail: '交换机瞬时抖动触发指数退避重连状态机，耗时 1.2s 自动恢复', created_at: '09:12:05', status: 'RECOVERED' },
+        { id: 'ALM-106', level: 'INFO', source: 'Novastar UHD-v3.0 视频推屏处理器', title: '大屏输入信号源成功切换为计时计分', detail: '已完成 SDI-1 (转播流) 向 TCP 接收卡 (ARES-21) 的画面无缝淡入淡出切换', created_at: '08:30:00', status: 'CLOSED' }
+      ]
+    }
+  }
+
+  // 6. 设备指令模拟
+  if (path.includes('/command')) {
+    return { success: true, message: '脱机指令已在沙箱中成功模拟响应' }
+  }
+
+  // 7. 用户专属外部集成软件脱机多用户隔离支持
+  if (path.startsWith('/external-apps')) {
+    let savedUser = null
+    try {
+      savedUser = JSON.parse(localStorage.getItem('venue_current_user') || 'null')
+    } catch {
+      savedUser = null
+    }
+    const username = savedUser?.username || 'admin'
+    const storageKey = `venue_ext_apps_${username}`
+
+    const getStoredApps = () => {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) {
+        try { return JSON.parse(raw) } catch { /* ignore */ }
+      }
+      // 默认按用户隔离的预置软件数据
+      if (username === 'admin') {
+        return [
+          { id: 1, username: 'admin', app_name: 'Antigravity IDE 智能开发环境', app_type: 'CS', target_path: 'D:\\antigravity\\Antigravity IDE\\antigravity.exe', start_args: '--portable', app_desc: '场馆工控协议自动化二次开发与调测环境', auth_username: 'admin', auth_password: 'dev@2026', icon_type: 'PRESET', icon: 'SvgDynamicDevice', custom_icon_url: '', sort_order: 1, created_at: '2026-10-12 10:00:00' },
+          { id: 2, username: 'admin', app_name: '票务检票闸机综合管控后台', app_type: 'BS', target_path: 'http://192.168.1.88:8080/ticketing/gate', start_args: '', app_desc: '东区与南区观众安检通道智能闸机核销控制系统', auth_username: 'gate_admin', auth_password: 'TicketPass#88', icon_type: 'PRESET', icon: 'SvgAppGrid', custom_icon_url: '', sort_order: 2, created_at: '2026-10-12 10:05:00' },
+          { id: 3, username: 'admin', app_name: 'Novastar NovaLCT 屏幕配置工具', app_type: 'CS', target_path: 'C:\\Program Files\\Novastar\\NovaLCT\\NovaLCT.exe', start_args: '', app_desc: '全彩主大屏箱体映射、灰度校准与多路网口发送卡配置端', auth_username: '', auth_password: '', icon_type: 'PRESET', icon: 'SvgLedScreen', custom_icon_url: '', sort_order: 3, created_at: '2026-10-12 10:10:00' },
+          { id: 4, username: 'admin', app_name: 'PLC 备用电源自动化巡检脚本', app_type: 'UNKNOWN', target_path: 'D:\\scripts\\plc_battery_check.bat', start_args: '--fast-check', app_desc: '双回路UPS与柴油发电机状态探针诊断批处理', auth_username: '', auth_password: '', icon_type: 'PRESET', icon: 'SvgDeviceSetting', custom_icon_url: '', sort_order: 4, created_at: '2026-10-12 10:15:00' }
+        ]
+      } else {
+        return [
+          { id: 5, username: 'operator', app_name: 'ARES-21 赛事计时计分现场终端', app_type: 'CS', target_path: 'C:\\Program Files\\Ares21\\Client\\ares21.exe', start_args: '--event=swimming', app_desc: '游泳跳水大项终点触板与发令台脉冲接收工作站', auth_username: 'op_timing', auth_password: 'Timing@2026', icon_type: 'PRESET', icon: 'SvgMatchScore', custom_icon_url: '', sort_order: 1, created_at: '2026-10-12 09:30:00' },
+          { id: 6, username: 'operator', app_name: '场馆公共广播与背景音乐播放系统', app_type: 'BS', target_path: 'http://192.168.1.66:8888/broadcasting', start_args: '', app_desc: '看台与热身池分区分区音频广播Web客户端', auth_username: 'audio_op', auth_password: 'Broadcast#99', icon_type: 'PRESET', icon: 'SvgSoundMatrix', custom_icon_url: '', sort_order: 2, created_at: '2026-10-12 09:35:00' }
+        ]
+      }
+    }
+
+    let items = getStoredApps()
+
+    if (options.method === 'POST' && path.endsWith('/launch')) {
+      const parts = path.split('/')
+      const appId = parseInt(parts[2], 10)
+      const found = items.find(a => a.id === appId)
+      return {
+        success: true,
+        app_id: appId,
+        app_name: found ? found.app_name : '外部软件',
+        app_type: found ? found.app_type : 'CS',
+        target_path: found ? found.target_path : '',
+        start_args: found ? found.start_args : '',
+        auth_username: found ? found.auth_username : '',
+        auth_password: found ? found.auth_password : '',
+        launch_action: found && found.app_type === 'BS' ? 'BROWSER_REDIRECT' : 'DESKTOP_EXECUTE'
+      }
+    }
+
+    if (options.method === 'POST') {
+      const body = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {})
+      const newApp = {
+        id: Date.now(),
+        username: username,
+        app_name: body.app_name || '未命名软件',
+        app_type: body.app_type || 'BS',
+        target_path: body.target_path || '',
+        start_args: body.start_args || '',
+        app_desc: body.app_desc || '',
+        auth_username: body.auth_username || '',
+        auth_password: body.auth_password || '',
+        icon_type: body.icon_type || 'PRESET',
+        icon: body.icon || 'SvgAppGrid',
+        custom_icon_url: body.custom_icon_url || '',
+        sort_order: Number(body.sort_order) || 0,
+        created_at: new Date().toLocaleString()
+      }
+      items.push(newApp)
+      localStorage.setItem(storageKey, JSON.stringify(items))
+      return newApp
+    }
+
+    if (options.method === 'PUT') {
+      const parts = path.split('/')
+      const appId = parseInt(parts[2], 10)
+      const body = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {})
+      const idx = items.findIndex(a => a.id === appId)
+      if (idx !== -1) {
+        items[idx] = { ...items[idx], ...body }
+        localStorage.setItem(storageKey, JSON.stringify(items))
+        return items[idx]
+      }
+      return { success: false, message: '未找到' }
+    }
+
+    if (options.method === 'DELETE') {
+      const parts = path.split('/')
+      const appId = parseInt(parts[2], 10)
+      items = items.filter(a => a.id !== appId)
+      localStorage.setItem(storageKey, JSON.stringify(items))
+      return { success: true, id: appId }
+    }
+
+    return { items, count: items.length, username }
+  }
+
+  // 4. 系统全局设置仿真
+  if (path === '/settings/public' || path === '/settings') {
+    if (options.method === 'POST') {
+      let body = {}
+      try {
+        body = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {})
+      } catch {
+        body = {}
+      }
+      // __offline 标记: 明确告知调用方"本次并未真正落库", 避免误报同步成功
+      return { success: true, message: '系统全局配置已保存(沙箱-未落库)', data: body, __offline: true }
+    }
+    try {
+      const cached = localStorage.getItem('ibms_system_settings_v1')
+      if (cached) return { ...JSON.parse(cached), __offline: true }
+    } catch {
+      // ignore
+    }
+    return { __offline: true }
+  }
+
+  // 5. 左侧导航菜单配置仿真 (与系统设置同款脱机降级: 本地缓存兜底, 写操作标注未落库)
+  if (path === '/menu/config') {
+    if (options.method === 'PUT') {
+      let body = {}
+      try {
+        body = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {})
+      } catch {
+        body = {}
+      }
+      try {
+        if (body && body.groups) localStorage.setItem('ibms_menu_config_v1', JSON.stringify(body))
+      } catch {
+        // ignore
+      }
+      return { success: true, message: '菜单配置已保存(沙箱-未落库)', data: body, __offline: true }
+    }
+    if (options.method === 'POST') {
+      // reset: 回到前端内置默认菜单
+      try {
+        localStorage.removeItem('ibms_menu_config_v1')
+      } catch {
+        // ignore
+      }
+      return { success: true, message: '菜单已恢复默认(沙箱-未落库)', __offline: true }
+    }
+    try {
+      const cached = localStorage.getItem('ibms_menu_config_v1')
+      if (cached) return { ...JSON.parse(cached), __offline: true }
+    } catch {
+      // ignore
+    }
+    return { __offline: true }
+  }
+
+  return { success: true, message: '仿真沙箱已响应' }
+}
+
+async function request(path, options = {}) {
+  const headers = new Headers(options.headers || {})
+  headers.set('Content-Type', 'application/json')
+  const token = localStorage.getItem('venue_access_token')
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers })
+    const contentType = response.headers.get('content-type') || ''
+    const payload = contentType.includes('application/json') ? await response.json() : await response.text()
+    if (!response.ok) {
+      const message = typeof payload === 'object' && payload?.detail ? payload.detail : `请求失败 (${response.status})`
+      const error = new Error(message)
+      error.status = response.status
+      error.payload = payload
+      throw error
+    }
+    emitApiStatus(true)
+    return payload
+  } catch (error) {
+    // 若遇到网络拒绝连接、未部署、跨域失败或 Failed to fetch，平滑降级至仿真沙箱
+    const isNetworkFailure = error.name === 'TypeError' ||
+      error.message?.includes('fetch') ||
+      error.message?.includes('NetworkError') ||
+      error.message?.includes('Failed to fetch') ||
+      error.status === 404 ||
+      error.status === 502 ||
+      error.status === 503
+
+    if (isNetworkFailure) {
+      // 后端不可达: 上报离线状态 (Header 会显示"离线模式·配置未同步"角标)
+      emitApiStatus(false, error.message || '后端服务不可达')
+      return handleMockFallback(path, options)
+    }
+
+    // HTTP 语义错误(401/403/404业务等)说明后端本身是通的
+    emitApiStatus(true)
+    throw error
+  }
+}
+
+export const api = {
+  login: (username, password) => request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
+  }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  me: () => request('/me'),
+  mockStatus: () => request('/mock/status'),
+  toggleMock: (enabled, reason) => request('/mock/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, reason })
+  }),
+  audit: (limit = 100) => request(`/audit?limit=${encodeURIComponent(limit)}`),
+  alarms: () => request('/alarms'),
+  deviceCommand: (deviceId, action, payload = {}) => request(`/devices/${encodeURIComponent(deviceId)}/command`, {
+    method: 'POST',
+    body: JSON.stringify({ action, payload })
+  }),
+  // 智能升旗系统（USR-K7 Modbus TCP 网关真实控制与读取）
+  flagStatus: (unitId = 1) => request(`/flag/status?unit_id=${encodeURIComponent(unitId)}`),
+  flagCommand: (action, payload = {}) => request('/flag/command', {
+    method: 'POST',
+    body: JSON.stringify({ action, ...payload })
+  }),
+
+  // 升旗设备管理（参数入库）
+  flagDevices: () => request('/flag/devices'),
+  flagDeviceStatus: (id) => request(`/flag/devices/${encodeURIComponent(id)}/status`),
+  flagPosition: (id) => request(`/flag/devices/${encodeURIComponent(id)}/position`),
+  flagProbe: (data) => request('/flag/probe', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  flagSaveDevice: (data) => request('/flag/devices', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  flagUpdateDevice: (id, data) => request(`/flag/devices/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
+  flagDeleteDevice: (id) => request(`/flag/devices/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  }),
+  flagGuard: (id) => request(`/flag/devices/${encodeURIComponent(id)}/guard`),
+  flagClearLatch: (id) => request(`/flag/devices/${encodeURIComponent(id)}/clear-latch`, { method: 'POST' }),
+  flagHeartbeat: (id) => request(`/flag/devices/${encodeURIComponent(id)}/heartbeat`, { method: 'POST' }),
+  // 标准时钟系统（母钟 UDP + 子钟 MySQL 参数入库与状态读取）
+  clockSettings: () => request('/clock/settings'),
+  saveClockSettings: (data) => request('/clock/settings', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  testClockSettings: (data) => request('/clock/settings/test', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  clockStatus: () => request('/clock/status'),
+  clockSubclocks: () => request('/clock/subclocks'),
+  clockSync: () => request('/clock/sync', { method: 'POST' }),
+  clockCommand: (action, payload = {}) => request('/clock/command', {
+    method: 'POST',
+    body: JSON.stringify({ action, ...payload })
+  }),
+  // 水下影像采集识别台账（image_platform MySQL）
+  underwaterLedger: (alertLimit = 50) => request(`/video/underwater/ledger?alert_limit=${alertLimit}`),
+  underwaterAlertImage: (alertId) => request(`/video/underwater/alert-image/${alertId}`),
+  videoPtz: (payload) => request('/video/ptz', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  // 外部集成软件管理（按用户隔离）
+  getExternalApps: () => request('/external-apps'),
+  createExternalApp: (data) => request('/external-apps', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  updateExternalApp: (id, data) => request(`/external-apps/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
+  deleteExternalApp: (id) => request(`/external-apps/${id}`, {
+    method: 'DELETE'
+  }),
+  launchExternalApp: (id) => request(`/external-apps/${id}/launch`, {
+    method: 'POST'
+  }),
+  // 系统全局配置
+  getPublicSettings: () => request('/settings/public'),
+  getSystemSettings: () => request('/settings'),
+  saveSystemSettings: (data) => request('/settings', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  // 左侧导航菜单配置 (写操作仅限总管理员 admin)
+  getMenuConfig: () => request('/menu/config'),
+  saveMenuConfig: (data) => request('/menu/config', {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
+  resetMenuConfig: () => request('/menu/config/reset', { method: 'POST' })
+}
+
+export { API_BASE_URL }

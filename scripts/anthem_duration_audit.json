@@ -1,0 +1,18 @@
+[
+  {
+    "code": "AE",
+    "nameCn": "阿联酋",
+    "anthemName": "祖国万岁",
+    "configured": 149,
+    "real_sec": 48.47,
+    "diff": -100.53
+  },
+  {
+    "code": "CN",
+    "nameCn": "中国",
+    "anthemName": "义勇军进行曲",
+    "configured": 46,
+    "real_sec": 48.56,
+    "diff": 2.56
+  }
+]

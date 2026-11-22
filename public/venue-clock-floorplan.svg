@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 840" width="1400" height="840">
+  <defs>
+    <!-- 建筑图纸浅色网格 -->
+    <pattern id="gridSmall" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" stroke-width="0.6" />
+    </pattern>
+    <pattern id="gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
+      <rect width="100" height="100" fill="url(#gridSmall)" />
+      <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cbd5e1" stroke-width="1" />
+    </pattern>
+    <!-- 泳池水波纹理 -->
+    <linearGradient id="poolWater" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e0f2fe" />
+      <stop offset="50%" stop-color="#bae6fd" />
+      <stop offset="100%" stop-color="#dbeafe" />
+    </linearGradient>
+    <linearGradient id="diveWater" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cffafe" />
+      <stop offset="100%" stop-color="#a5f3fc" />
+    </linearGradient>
+    <!-- 看台阶梯线 -->
+    <pattern id="standSeatsH" width="14" height="10" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="9" x2="14" y2="9" stroke="#cbd5e1" stroke-width="1" />
+    </pattern>
+    <pattern id="standSeatsV" width="10" height="14" patternUnits="userSpaceOnUse">
+      <line x1="9" y1="0" x2="9" y2="14" stroke="#cbd5e1" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <!-- 背景底图与坐标网格 -->
+  <rect x="0" y="0" width="1400" height="840" fill="#f8fafc" />
+  <rect x="30" y="30" width="1340" height="780" fill="url(#gridMajor)" stroke="#94a3b8" stroke-width="1.5" />
+
+  <!-- 图纸外框与建筑轴线编号 -->
+  <g font-family="Consolas, 'Microsoft YaHei', sans-serif" font-size="12" fill="#64748b" text-anchor="middle">
+    <text x="150" y="20">A</text>
+    <text x="370" y="20">B</text>
+    <text x="590" y="20">C</text>
+    <text x="810" y="20">D</text>
+    <text x="1030" y="20">E</text>
+    <text x="1250" y="20">F</text>
+    <text x="16" y="140">1</text>
+    <text x="16" y="320">2</text>
+    <text x="16" y="500">3</text>
+    <text x="16" y="680">4</text>
+  </g>
+
+  <!-- 场馆建筑主体外墙（圆角矩形） -->
+  <rect x="60" y="50" width="1280" height="740" rx="28" fill="#ffffff" stroke="#334155" stroke-width="4" />
+  <rect x="70" y="60" width="1260" height="720" rx="22" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="8 5" />
+
+  <!-- ==================== 北侧功能区（顶部） ==================== -->
+  <!-- 指挥中心 / 转播室 -->
+  <rect x="90" y="78" width="270" height="104" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2" />
+  <text x="225" y="124" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="16" font-weight="700" fill="#1e3a8a">指挥中心 / 弱电总控室</text>
+  <text x="225" y="148" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#3b82f6">母钟主机 · 电视转播机房</text>
+
+  <!-- 主席台 / VIP 贵宾席 -->
+  <rect x="380" y="78" width="420" height="104" rx="8" fill="#fefce8" stroke="#eab308" stroke-width="2" />
+  <rect x="392" y="90" width="396" height="36" rx="4" fill="url(#standSeatsH)" opacity="0.7" />
+  <text x="590" y="146" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="17" font-weight="700" fill="#854d0e">主席台 / VIP 贵宾观礼厅</text>
+  <text x="590" y="168" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#a16207">主席台前檐 · 贵宾休息室</text>
+
+  <!-- 总裁判长席 / 计时计分室 -->
+  <rect x="820" y="78" width="250" height="104" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2" />
+  <text x="945" y="124" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="16" font-weight="700" fill="#166534">总裁判长席 / 仲裁室</text>
+  <text x="945" y="148" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#16a34a">计时计分与发令控制</text>
+
+  <!-- 新闻发布厅 / 媒体席 -->
+  <rect x="1090" y="78" width="220" height="104" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="2" />
+  <text x="1200" y="124" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="16" font-weight="700" fill="#581c87">新闻发布厅 / 媒体区</text>
+  <text x="1200" y="148" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#7e22ce">记者工作间 · 采访通道</text>
+
+  <!-- 北侧主走廊 -->
+  <rect x="90" y="192" width="1220" height="34" rx="4" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />
+  <text x="700" y="213" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#475569" letter-spacing="6">北 侧 环 形 主 通 道</text>
+
+  <!-- ==================== 西侧功能区（检录/更衣/医务） ==================== -->
+  <g font-family="'Microsoft YaHei', sans-serif" text-anchor="middle">
+    <rect x="90" y="240" width="135" height="125" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.8" />
+    <text x="157" y="296" font-size="15" font-weight="700" fill="#1e293b">运动员检录处</text>
+    <text x="157" y="318" font-size="11.5" fill="#64748b">赛前集合 · 出场通道</text>
+
+    <rect x="90" y="378" width="135" height="115" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.8" />
+    <text x="157" y="430" font-size="15" font-weight="700" fill="#1e293b">更衣室 / 热身区</text>
+    <text x="157" y="452" font-size="11.5" fill="#64748b">男/女运动员更衣</text>
+
+    <rect x="90" y="506" width="135" height="106" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.8" />
+    <text x="157" y="554" font-size="15" font-weight="700" fill="#881337">兴奋剂检查 / 医务</text>
+    <text x="157" y="576" font-size="11.5" fill="#be123c">药检室 · 医疗急救</text>
+  </g>
+
+  <!-- ==================== 中央核心比赛区 ==================== -->
+  <!-- 50m 标准比赛泳池 / 赛场（8 泳道） -->
+  <rect x="255" y="242" width="675" height="370" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" />
+  <!-- 池岸边与起跳台 -->
+  <rect x="275" y="262" width="635" height="330" rx="6" fill="url(#poolWater)" stroke="#0284c7" stroke-width="3.5" />
+  <!-- 8条泳道线 (330 / 8 = 41.25px) -->
+  <g stroke="#38bdf8" stroke-width="1.6" stroke-dasharray="10 6">
+    <line x1="275" y1="303" x2="910" y2="303" />
+    <line x1="275" y1="344" x2="910" y2="344" />
+    <line x1="275" y1="386" x2="910" y2="386" />
+    <line x1="275" y1="427" x2="910" y2="427" />
+    <line x1="275" y1="468" x2="910" y2="468" />
+    <line x1="275" y1="509" x2="910" y2="509" />
+    <line x1="275" y1="551" x2="910" y2="551" />
+  </g>
+  <!-- 泳道号 1~8 与起跳台 -->
+  <g font-family="Consolas, sans-serif" font-size="11" font-weight="700" fill="#0369a1">
+    <rect x="265" y="274" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="287">1道</text>
+    <rect x="265" y="315" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="328">2道</text>
+    <rect x="265" y="356" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="369">3道</text>
+    <rect x="265" y="398" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="411">4道</text>
+    <rect x="265" y="439" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="452">5道</text>
+    <rect x="265" y="480" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="493">6道</text>
+    <rect x="265" y="521" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="534">7道</text>
+    <rect x="265" y="563" width="12" height="18" rx="2" fill="#0284c7" /><text x="290" y="576">8道</text>
+  </g>
+  <!-- 主赛场水印标题 -->
+  <rect x="445" y="394" width="295" height="66" rx="8" fill="rgba(255,255,255,0.78)" stroke="#7dd3fc" stroke-width="1.2" />
+  <text x="592" y="423" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="20" font-weight="700" fill="#0369a1">标准 50m 比赛主泳池</text>
+  <text x="592" y="446" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#0284c7">起跳出发台（西） · 触壁终点（东）</text>
+
+  <!-- ==================== 东侧跳水深水池 & 热身池 ==================== -->
+  <rect x="955" y="242" width="245" height="370" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" />
+  <rect x="973" y="262" width="209" height="205" rx="6" fill="url(#diveWater)" stroke="#0891b2" stroke-width="3" />
+  <text x="1077" y="356" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="17" font-weight="700" fill="#155e75">跳水深水池</text>
+  <text x="1077" y="378" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="11.5" fill="#0e7490">10m / 7.5m / 5m 跳台</text>
+  <!-- 跳台示意 -->
+  <rect x="1158" y="310" width="28" height="90" rx="3" fill="#cbd5e1" stroke="#475569" stroke-width="1.5" />
+
+  <rect x="973" y="482" width="209" height="110" rx="6" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="2.2" />
+  <text x="1077" y="534" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="15" font-weight="700" fill="#0369a1">热身训练池</text>
+  <text x="1077" y="555" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="11.5" fill="#0284c7">25m 赛前热身区</text>
+
+  <!-- 东侧观众看台 -->
+  <rect x="1218" y="242" width="92" height="370" rx="8" fill="url(#standSeatsV)" stroke="#64748b" stroke-width="1.8" />
+  <rect x="1234" y="355" width="60" height="145" rx="6" fill="rgba(255,255,255,0.88)" />
+  <text x="1264" y="427" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="14" font-weight="700" fill="#334155" writing-mode="tb">东侧观众看台区</text>
+
+  <!-- ==================== 南侧观众大厅与入口区 ==================== -->
+  <!-- 南侧环形通道 -->
+  <rect x="90" y="626" width="1220" height="28" rx="4" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />
+  <text x="700" y="644" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#475569" letter-spacing="6">南 侧 观 众 集 散 通 道</text>
+
+  <!-- 西南角：消防安保/设备间 -->
+  <rect x="90" y="666" width="275" height="96" rx="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.8" />
+  <text x="227" y="710" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="15" font-weight="700" fill="#1e293b">西大厅 / 休息廊</text>
+  <text x="227" y="732" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="11.5" fill="#64748b">无障碍通道 · 卫生间</text>
+
+  <!-- 中南：观众安检主大厅 -->
+  <rect x="385" y="666" width="440" height="96" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2" />
+  <text x="605" y="710" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="17" font-weight="700" fill="#1e3a8a">南门观众安检主大厅</text>
+  <text x="605" y="733" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="12" fill="#2563eb">票务核验 · 安检闸机 · 主大屏区</text>
+  <!-- 南门入口箭头 -->
+  <polygon points="605,786 593,766 617,766" fill="#2563eb" />
+
+  <!-- 东南：场馆外围广场 / 颁奖区 -->
+  <rect x="845" y="666" width="465" height="96" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.8" />
+  <text x="1077" y="710" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="15" font-weight="700" fill="#166534">东外围广场 / 颁奖区</text>
+  <text x="1077" y="732" text-anchor="middle" font-family="'Microsoft YaHei', sans-serif" font-size="11.5" fill="#15803d">升旗台联动 · 观众疏散出口</text>
+
+  <!-- ==================== 角落指北针 & 比例尺 ==================== -->
+  <g transform="translate(1310, 95)" font-family="'Microsoft YaHei', sans-serif">
+    <circle cx="0" cy="0" r="22" fill="#ffffff" stroke="#475569" stroke-width="1.5" />
+    <polygon points="0,-16 -6,6 0,2 6,6" fill="#dc2626" />
+    <text x="0" y="-25" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">N</text>
+  </g>
+  <g transform="translate(95, 795)" font-family="Consolas, sans-serif" font-size="11" fill="#475569">
+    <line x1="0" y1="0" x2="120" y2="0" stroke="#475569" stroke-width="2" />
+    <line x1="0" y1="-4" x2="0" y2="4" stroke="#475569" stroke-width="1.5" />
+    <line x1="60" y1="-4" x2="60" y2="4" stroke="#475569" stroke-width="1.5" />
+    <line x1="120" y1="-4" x2="120" y2="4" stroke="#475569" stroke-width="1.5" />
+    <text x="0" y="-7">0</text>
+    <text x="54" y="-7">25m</text>
+    <text x="110" y="-7">50m</text>
+    <text x="145" y="-2" font-family="'Microsoft YaHei', sans-serif">体育场馆子钟点位底图 (SVG)</text>
+  </g>
+</svg>

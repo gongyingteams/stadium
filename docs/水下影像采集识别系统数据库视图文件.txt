@@ -1,0 +1,22 @@
+1、数据库类型为MYSQL数据库；
+2、DATABASE：image_platform
+3、IP（请联系场馆戚经理获取当前部署的服务器IP）  端口：3306
+4、密码：123456
+5、视图表名： tb_alert_history_view
+6、数据结构
+CREATE TABLE `tb_alert_history` (
+  `id` bigint(20) NOT NULL,
+  `title` varchar(255) DEFAULT NULL,
+  `content` varchar(254) DEFAULT NULL,
+  `image` longtext,
+  `camera_id` bigint(20) DEFAULT NULL,
+  `push_devices` varchar(255) DEFAULT NULL,
+  `state` int(11) DEFAULT NULL,
+  `create_time` datetime DEFAULT NULL,
+  `created_by` bigint(20) DEFAULT NULL,
+  `update_time` datetime DEFAULT NULL,
+  `updated_by` bigint(20) DEFAULT NULL,
+  `push_success` bit(1) DEFAULT NULL,
+  `camera_group` varchar(25) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='报警历史表';
