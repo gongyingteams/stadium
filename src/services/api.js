@@ -413,6 +413,14 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+  videoSnapshots: () => request('/video/snapshots'),
+  videoSnapshot: (payload) => request('/video/snapshot', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  deleteVideoSnapshot: (filename) => request(`/video/snapshots/${encodeURIComponent(filename)}`, {
+    method: 'DELETE'
+  }),
   // 外部集成软件管理（按用户隔离）
   getExternalApps: () => request('/external-apps'),
   createExternalApp: (data) => request('/external-apps', {

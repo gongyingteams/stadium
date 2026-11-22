@@ -104,13 +104,23 @@ const routes = [
     path: '/iot/video',
     name: 'VideoLiveMatrix',
     component: () => import('@/views/iot/VideoLiveMatrix.vue'),
-    meta: { title: '现场影像监控与转播监视台', shortTitle: '视频监控', icon: 'SvgCameraMatrix' }
+    meta: { title: '现场摄像机实时监看总控台', shortTitle: '视频监控', icon: 'SvgCameraMatrix' }
+  },
+  {
+    path: '/iot/underwater-video',
+    name: 'UnderwaterVideoControl',
+    component: () => import('@/views/iot/UnderwaterVideoControl.vue'),
+    meta: { title: '水下音像采集控制', shortTitle: '水下采集', icon: 'SvgCameraMatrix' }
+  },
+  {
+    path: '/iot/underwater-video/ledger',
+    name: 'UnderwaterLedger',
+    component: () => import('@/views/iot/UnderwaterLedger.vue'),
+    meta: { title: '水下音像识别台账与报警监视', shortTitle: '水下台账', icon: 'SvgCameraMatrix' }
   },
   {
     path: '/iot/video/ledger',
-    name: 'UnderwaterLedger',
-    component: () => import('@/views/iot/UnderwaterLedger.vue'),
-    meta: { title: '现场影像识别台账与报警监视', shortTitle: '现场台账', icon: 'SvgCameraMatrix' }
+    redirect: '/iot/underwater-video/ledger'
   },
   {
     path: '/iot/media',

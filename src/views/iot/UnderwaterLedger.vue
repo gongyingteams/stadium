@@ -3,9 +3,9 @@
     <!-- 顶部栏 -->
     <section class="ledger-header glass-panel">
       <div class="ledger-heading">
-        <button class="btn-back" @click="$router.push('/iot/video')">← 返回视频监控台</button>
+        <button class="btn-back" @click="$router.push('/iot/underwater-video')">← 返回水下音像采集控制</button>
         <div>
-          <h1>现场影像采集识别系统 · 数据库台账与实时报警监测</h1>
+          <h1>水下音像采集识别系统 · 数据库台账与实时报警监测</h1>
           <p>数据源：192.168.0.33:3306 / image_platform（展示全部库表字段 · 定时轮询新增报警并弹窗预警）</p>
         </div>
       </div>
@@ -35,7 +35,7 @@
     <!-- 摘要指标卡 -->
     <section class="ledger-kpis">
       <div class="kpi-card glass-panel">
-        <span>现场摄像机 (tb_camera)</span>
+        <span>水下摄像机 (tb_camera)</span>
         <strong class="num-mono">{{ cameras.length }} 台</strong>
         <em>启用中 {{ cameras.filter(c => c.state === 1).length }} 台 · 停用 {{ cameras.filter(c => c.state !== 1).length }} 台</em>
       </div>

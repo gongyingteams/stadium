@@ -36,7 +36,8 @@ export const DEFAULT_MENU_CONFIG = {
         { id: 'iot-score', menuKey: 'iot-score', title: '赛事计时计分接收与大屏推屏', shortTitle: '计时计分', path: '/iot/score', icon: 'SvgMatchScore', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'SCORE' },
         { id: 'iot-flag', menuKey: 'iot-flag', title: '自动升旗仪式与音画同步仿真台', shortTitle: '智能升旗', path: '/iot/flag', icon: 'SvgFlagSystem', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'FLAG' },
         { id: 'iot-clock', menuKey: 'iot-clock', title: '标准时钟卫星授时与子钟监测台', shortTitle: '时钟同步', path: '/iot/clock', icon: 'SvgMasterClock', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'CLOCK' },
-        { id: 'iot-video', menuKey: 'iot-video', title: '现场水下监控与转播监视台', shortTitle: '视频监控', path: '/iot/video', icon: 'SvgCameraMatrix', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'VIDEO' },
+        { id: 'iot-video', menuKey: 'iot-video', title: '现场摄像机实时监看总控台', shortTitle: '视频监控', path: '/iot/video', icon: 'SvgCameraMatrix', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'VIDEO' },
+        { id: 'iot-underwater-video', menuKey: 'iot-underwater-video', title: '水下音像采集控制', shortTitle: '水下采集', path: '/iot/underwater-video', icon: 'SvgCameraMatrix', visible: true, requiresAdmin: false, requiresOps: false, badgeType: '' },
         { id: 'iot-media', menuKey: 'iot-media', title: '媒体播控台(背景音乐与视频投屏)', shortTitle: '媒体播控', path: '/iot/media', icon: 'SvgMediaPlayer', visible: true, requiresAdmin: false, requiresOps: false, badgeType: 'MEDIA' },
         { id: 'iot-dynamic', menuKey: 'iot-dynamic', title: '动态低代码通用设备控制台', shortTitle: '动态设备', path: '/iot/dynamic/group-01', icon: 'SvgDynamicDevice', visible: true, requiresAdmin: false, requiresOps: false, badgeType: '' }
       ]
@@ -124,6 +125,36 @@ class MenuConfigService {
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && Array.isArray(parsed.groups) && parsed.groups.length > 0) {
+          // 离线缓存平滑补齐新增的「水下音像采集控制」菜单项
+          const hasUw = parsed.groups.some(g =>
+            (g.children || []).some(c => c.menuKey === 'iot-underwater-video' || c.path === '/iot/underwater-video')
+          )
+          if (!hasUw) {
+            const iotGroup = parsed.groups.find(g => g.menuKey === 'g-iot' || g.id === 'g-iot')
+            if (iotGroup && Array.isArray(iotGroup.children)) {
+              const videoIdx = iotGroup.children.findIndex(c => c.menuKey === 'iot-video' || c.path === '/iot/video')
+              const uwItem = {
+                id: 'iot-underwater-video',
+                menuKey: 'iot-underwater-video',
+                title: '水下音像采集控制',
+                shortTitle: '水下采集',
+                path: '/iot/underwater-video',
+                icon: 'SvgCameraMatrix',
+                visible: true,
+                requiresAdmin: false,
+                requiresOps: false,
+                badgeType: ''
+              }
+              if (videoIdx >= 0) {
+                iotGroup.children.splice(videoIdx + 1, 0, uwItem)
+              } else {
+                iotGroup.children.push(uwItem)
+              }
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed))
+              } catch { /* ignore */ }
+            }
+          }
           return parsed
         }
       }

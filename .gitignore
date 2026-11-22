@@ -16,6 +16,7 @@ logs/
 
 # 本地运行时数据（服务启动自动建表）
 backend/data/*.db
+public/uploads/snapshots/
 
 # 环境变量 / 密钥（按 backend/.env.example 自行创建）
 backend/.env

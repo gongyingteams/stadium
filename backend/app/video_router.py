@@ -1,16 +1,22 @@
-"""LAN IP camera & vMix video source probing, control, and stream proxy router."""
+"""LAN IP camera & vMix video source probing, control, snapshot, and stream proxy router."""
 from __future__ import annotations
 
+import base64
+import json
+import re
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 try:
@@ -34,10 +40,22 @@ UNDERWATER_DB_CFG = {
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SNAPSHOT_DIR = ROOT_DIR / "public" / "uploads" / "snapshots"
+SNAPSHOT_META_FILE = SNAPSHOT_DIR / "index.json"
+_LATEST_FRAMES: dict[str, tuple[float, bytes]] = {}
+
 
 class VideoProbeRequest(BaseModel):
     target: str
     protocol: str = "auto"
+
+
+class SnapshotRequest(BaseModel):
+    cameraId: str = ""
+    cameraName: str = ""
+    streamUrl: str = ""
+    imageBase64: str = ""
 
 
 class VmixCutRequest(BaseModel):
@@ -404,6 +422,7 @@ def stream_rtsp_as_mjpeg(url: str = Query(..., description="RTSP/HTTP stream URL
                         break
                     jpg = bytes(buf[soi : eoi + 2])
                     del buf[: eoi + 2]
+                    _LATEST_FRAMES[target] = (time.time(), jpg)
                     yield (
                         b"--frame\r\n"
                         b"Content-Type: image/jpeg\r\n"
@@ -484,3 +503,205 @@ def send_visca_ptz(body: PtzCommandRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"摄像机 PTZ 连接失败 ({host}:{body.port}): {exc}") from exc
     finally:
         sock.close()
+
+
+def _ensure_snapshot_dir() -> Path:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    return SNAPSHOT_DIR
+
+
+def _load_snapshot_meta() -> list[dict[str, Any]]:
+    if not SNAPSHOT_META_FILE.exists():
+        return []
+    try:
+        data = json.loads(SNAPSHOT_META_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_snapshot_meta(items: list[dict[str, Any]]) -> None:
+    _ensure_snapshot_dir()
+    SNAPSHOT_META_FILE.write_text(
+        json.dumps(items[:200], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _format_snapshot_record(item: dict[str, Any]) -> dict[str, Any] | None:
+    filename = str(item.get("filename") or "").strip()
+    if not filename or Path(filename).name != filename:
+        return None
+    file_path = SNAPSHOT_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        return None
+    stat = file_path.stat()
+    return {
+        "id": filename,
+        "filename": filename,
+        "cameraId": str(item.get("cameraId") or ""),
+        "cameraName": str(item.get("cameraName") or filename),
+        "streamUrl": str(item.get("streamUrl") or ""),
+        "url": f"/api/video/snapshots/file/{urllib.parse.quote(filename)}",
+        "publicUrl": f"/uploads/snapshots/{urllib.parse.quote(filename)}",
+        "filePath": str(file_path.resolve()),
+        "storageDir": str(SNAPSHOT_DIR.resolve()),
+        "size": stat.st_size,
+        "createdAt": str(item.get("createdAt") or datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")),
+    }
+
+
+def _grab_frame_from_stream(stream_url: str) -> bytes | None:
+    target = (stream_url or "").strip()
+    if not target:
+        return None
+    cached = _LATEST_FRAMES.get(target)
+    if cached and (time.time() - cached[0]) <= 10.0 and cached[1]:
+        return cached[1]
+    if not target.startswith(("rtsp://", "rtsps://", "http://", "https://")):
+        return None
+    if imageio_ffmpeg is None:
+        return None
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [ffmpeg_exe]
+    if target.startswith(("rtsp://", "rtsps://")):
+        cmd.extend(["-rtsp_transport", "tcp"])
+    cmd.extend([
+        "-i", target,
+        "-frames:v", "1",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "-q:v", "3",
+        "pipe:1",
+    ])
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=6,
+            creationflags=creationflags,
+        )
+        raw = res.stdout or b""
+        soi = raw.find(b"\xff\xd8")
+        eoi = raw.rfind(b"\xff\xd9")
+        if soi != -1 and eoi != -1 and eoi > soi:
+            return raw[soi : eoi + 2]
+    except Exception:
+        return None
+    return None
+
+
+@router.get("/snapshots")
+def list_video_snapshots() -> dict[str, Any]:
+    """List saved camera snapshots and return the local storage directory path."""
+    snap_dir = _ensure_snapshot_dir()
+    meta_items = _load_snapshot_meta()
+    seen: set[str] = set()
+    records: list[dict[str, Any]] = []
+
+    for item in meta_items:
+        rec = _format_snapshot_record(item)
+        if rec and rec["filename"] not in seen:
+            seen.add(rec["filename"])
+            records.append(rec)
+
+    # 扫描目录中可能存在但未登记到 index.json 的截图文件
+    extra_files = sorted(
+        (p for p in snap_dir.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for p in extra_files:
+        if p.name in seen:
+            continue
+        rec = _format_snapshot_record({"filename": p.name, "cameraName": p.stem})
+        if rec:
+            seen.add(p.name)
+            records.append(rec)
+
+    return {
+        "ok": True,
+        "storageDir": str(snap_dir.resolve()),
+        "snapshots": records,
+    }
+
+
+@router.post("/snapshot")
+def capture_video_snapshot(body: SnapshotRequest) -> dict[str, Any]:
+    """Capture a camera frame (from client base64 or active RTSP/HTTP stream) and save to public/uploads/snapshots."""
+    snap_dir = _ensure_snapshot_dir()
+    img_bytes: bytes | None = None
+    ext = ".jpg"
+
+    raw_b64 = (body.imageBase64 or "").strip()
+    if raw_b64:
+        if raw_b64.startswith("data:image/png"):
+            ext = ".png"
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+        try:
+            img_bytes = base64.b64decode(raw_b64)
+        except Exception:
+            img_bytes = None
+
+    if not img_bytes:
+        img_bytes = _grab_frame_from_stream(body.streamUrl)
+
+    if not img_bytes or len(img_bytes) < 64:
+        raise HTTPException(
+            status_code=502,
+            detail="未获取到实时视频画面，请确认摄像机在线且正在正常出流后重试抓拍",
+        )
+
+    now_dt = datetime.now()
+    safe_cam_id = re.sub(r"[^a-zA-Z0-9_-]+", "", str(body.cameraId or "cam"))[:24] or "cam"
+    filename = f"snap_{now_dt.strftime('%Y%m%d_%H%M%S_%f')[:19]}_{safe_cam_id}{ext}"
+    file_path = snap_dir / filename
+    file_path.write_bytes(img_bytes)
+
+    masked_stream = re.sub(r"//[^/@]+@", "//***@", (body.streamUrl or "").strip())
+    meta_entry = {
+        "filename": filename,
+        "cameraId": str(body.cameraId or ""),
+        "cameraName": (body.cameraName or "").strip() or f"摄像机 {safe_cam_id}",
+        "streamUrl": masked_stream,
+        "createdAt": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    meta_items = _load_snapshot_meta()
+    meta_items.insert(0, meta_entry)
+    _save_snapshot_meta(meta_items)
+
+    record = _format_snapshot_record(meta_entry)
+    return {
+        "ok": True,
+        "storageDir": str(snap_dir.resolve()),
+        "snapshot": record,
+    }
+
+
+@router.get("/snapshots/file/{filename}")
+def get_video_snapshot_file(filename: str):
+    """Serve a saved snapshot image directly."""
+    if not filename or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="非法文件名")
+    file_path = SNAPSHOT_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="抓拍截图文件不存在")
+    media_type = "image/png" if file_path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(str(file_path), media_type=media_type)
+
+
+@router.delete("/snapshots/{filename}")
+def delete_video_snapshot(filename: str) -> dict[str, Any]:
+    """Delete a saved snapshot image and its metadata entry."""
+    if not filename or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="非法文件名")
+    file_path = SNAPSHOT_DIR / filename
+    if file_path.exists() and file_path.is_file():
+        file_path.unlink()
+    meta_items = [item for item in _load_snapshot_meta() if item.get("filename") != filename]
+    _save_snapshot_meta(meta_items)
+    return {"ok": True, "filename": filename}

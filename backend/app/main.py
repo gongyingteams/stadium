@@ -155,9 +155,12 @@ DEFAULT_MENU_TREE: list[dict[str, Any]] = [
             {"menuKey": "iot-clock", "title": "标准时钟卫星授时与子钟监测台", "shortTitle": "时钟同步",
              "path": "/iot/clock", "icon": "SvgMasterClock", "visible": True,
              "requiresAdmin": False, "requiresOps": False, "badgeType": "CLOCK"},
-            {"menuKey": "iot-video", "title": "现场水下监控与转播监视台", "shortTitle": "视频监控",
+            {"menuKey": "iot-video", "title": "现场摄像机实时监看总控台", "shortTitle": "视频监控",
              "path": "/iot/video", "icon": "SvgCameraMatrix", "visible": True,
              "requiresAdmin": False, "requiresOps": False, "badgeType": "VIDEO"},
+            {"menuKey": "iot-underwater-video", "title": "水下音像采集控制", "shortTitle": "水下采集",
+             "path": "/iot/underwater-video", "icon": "SvgCameraMatrix", "visible": True,
+             "requiresAdmin": False, "requiresOps": False, "badgeType": ""},
             {"menuKey": "iot-media", "title": "媒体播控台(背景音乐与视频投屏)", "shortTitle": "媒体播控",
              "path": "/iot/media", "icon": "SvgMediaPlayer", "visible": True,
              "requiresAdmin": False, "requiresOps": False, "badgeType": "MEDIA"},
@@ -309,6 +312,34 @@ def init_db() -> None:
         # 左侧导航菜单: 表为空时播种出厂默认菜单树
         if connection.execute("SELECT count(*) FROM sys_menu").fetchone()[0] == 0:
             seed_menu(connection)
+        else:
+            # 平滑补齐新增的「水下音像采集控制」菜单项（应对本地SQLite已有表）
+            has_uw_video = connection.execute(
+                "SELECT 1 FROM sys_menu WHERE menu_key = 'iot-underwater-video' OR path = '/iot/underwater-video'"
+            ).fetchone()
+            if not has_uw_video:
+                iot_grp = connection.execute(
+                    "SELECT id FROM sys_menu WHERE menu_type = 'GROUP' AND menu_key = 'g-iot'"
+                ).fetchone()
+                if iot_grp:
+                    vid_row = connection.execute(
+                        "SELECT sort_order FROM sys_menu WHERE parent_id = ? AND (menu_key = 'iot-video' OR path = '/iot/video')",
+                        (iot_grp[0],),
+                    ).fetchone()
+                    insert_order = (vid_row[0] + 1) if vid_row else 8
+                    connection.execute(
+                        "UPDATE sys_menu SET sort_order = sort_order + 1 WHERE parent_id = ? AND sort_order >= ?",
+                        (iot_grp[0], insert_order),
+                    )
+                    now_str = now()
+                    connection.execute(
+                        """INSERT INTO sys_menu
+                           (parent_id, menu_type, menu_key, title, short_title, path, icon, visible,
+                            sort_order, requires_admin, requires_ops, badge_type, created_at, updated_at, updated_by)
+                           VALUES (?, 'ITEM', 'iot-underwater-video', '水下音像采集控制', '水下采集',
+                                   '/iot/underwater-video', 'SvgCameraMatrix', 1, ?, 0, 0, '', ?, ?, 'system')""",
+                        (iot_grp[0], insert_order, now_str, now_str),
+                    )
         # 平滑增加新增字段（应对本地SQLite已有表）
         cols = [c[1] for c in connection.execute("PRAGMA table_info(user_external_apps)").fetchall()]
         if "auth_username" not in cols:
