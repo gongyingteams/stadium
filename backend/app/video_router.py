@@ -29,7 +29,7 @@ try:
 except Exception:  # pragma: no cover
     pymysql = None  # type: ignore
 
-UNDERWATER_DB_CFG = {
+DEFAULT_UNDERWATER_DB_CFG: dict[str, Any] = {
     "host": "192.168.0.33",
     "port": 3306,
     "user": "user_view",
@@ -41,9 +41,20 @@ UNDERWATER_DB_CFG = {
 router = APIRouter(prefix="/api/video", tags=["video"])
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+UNDERWATER_DB_CFG_FILE = ROOT_DIR / "backend" / "data" / "underwater_db_config.json"
 SNAPSHOT_DIR = ROOT_DIR / "public" / "uploads" / "snapshots"
 SNAPSHOT_META_FILE = SNAPSHOT_DIR / "index.json"
 _LATEST_FRAMES: dict[str, tuple[float, bytes]] = {}
+
+
+class UnderwaterDbConfigRequest(BaseModel):
+    host: str
+    port: int = 3306
+    user: str = "user_view"
+    password: str = ""
+    keepPassword: bool = True
+    database: str = "image_platform"
+    charset: str = "utf8mb4"
 
 
 class VideoProbeRequest(BaseModel):
@@ -259,26 +270,153 @@ def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _connect_underwater_db():
+def _load_underwater_db_cfg() -> dict[str, Any]:
+    cfg = dict(DEFAULT_UNDERWATER_DB_CFG)
+    if UNDERWATER_DB_CFG_FILE.exists():
+        try:
+            saved = json.loads(UNDERWATER_DB_CFG_FILE.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                if saved.get("host"):
+                    cfg["host"] = str(saved["host"]).strip()
+                if saved.get("port"):
+                    cfg["port"] = int(saved["port"])
+                if saved.get("user") is not None:
+                    cfg["user"] = str(saved["user"]).strip()
+                if saved.get("password") is not None:
+                    cfg["password"] = str(saved["password"])
+                if saved.get("database"):
+                    cfg["database"] = str(saved["database"]).strip()
+                if saved.get("charset"):
+                    cfg["charset"] = str(saved["charset"]).strip()
+        except Exception:
+            pass
+    return cfg
+
+
+def _save_underwater_db_cfg(cfg: dict[str, Any]) -> None:
+    UNDERWATER_DB_CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    UNDERWATER_DB_CFG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _public_underwater_db_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "host": cfg["host"],
+        "port": int(cfg["port"]),
+        "user": cfg["user"],
+        "database": cfg["database"],
+        "charset": cfg.get("charset") or "utf8mb4",
+        "hasPassword": bool(cfg.get("password")),
+    }
+
+
+def _resolve_db_cfg_from_request(body: UnderwaterDbConfigRequest) -> dict[str, Any]:
+    current = _load_underwater_db_cfg()
+    host = (body.host or "").strip()
+    database = (body.database or "").strip()
+    user = (body.user or "").strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="请填写数据库主机 IP 或域名")
+    if not database:
+        raise HTTPException(status_code=400, detail="请填写数据库名称")
+    port = int(body.port or 3306)
+    if port < 1 or port > 65535:
+        raise HTTPException(status_code=400, detail="数据库端口必须在 1~65535 之间")
+    password = body.password if (body.password != "" or not body.keepPassword) else current.get("password", "")
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "database": database,
+        "charset": (body.charset or "utf8mb4").strip() or "utf8mb4",
+    }
+
+
+def _connect_underwater_db(cfg_override: dict[str, Any] | None = None):
     if pymysql is None:
         raise HTTPException(status_code=500, detail="后端未安装 pymysql 驱动")
+    cfg = cfg_override or _load_underwater_db_cfg()
     return pymysql.connect(
-        **UNDERWATER_DB_CFG,
+        host=cfg["host"],
+        port=int(cfg["port"]),
+        user=cfg["user"],
+        password=cfg["password"],
+        database=cfg["database"],
+        charset=cfg.get("charset") or "utf8mb4",
         connect_timeout=4,
         read_timeout=6,
         cursorclass=pymysql.cursors.DictCursor,
     )
 
 
+@router.get("/underwater/db-config")
+def get_underwater_db_config() -> dict[str, Any]:
+    cfg = _load_underwater_db_cfg()
+    return {"ok": True, "config": _public_underwater_db_cfg(cfg)}
+
+
+@router.post("/underwater/db-config")
+def save_underwater_db_config(body: UnderwaterDbConfigRequest) -> dict[str, Any]:
+    cfg = _resolve_db_cfg_from_request(body)
+    _save_underwater_db_cfg(cfg)
+    return {
+        "ok": True,
+        "message": f"已保存水下台账数据库配置（{cfg['host']}:{cfg['port']} / {cfg['database']}）",
+        "config": _public_underwater_db_cfg(cfg),
+    }
+
+
+@router.post("/underwater/db-config/test")
+def test_underwater_db_config(body: UnderwaterDbConfigRequest) -> dict[str, Any]:
+    cfg = _resolve_db_cfg_from_request(body)
+    try:
+        conn = _connect_underwater_db(cfg)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {
+            "ok": False,
+            "message": f"连接数据库失败（{cfg['host']}:{cfg['port']} / {cfg['database']}）：{exc}",
+        }
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT VERSION() AS ver")
+            ver_row = cur.fetchone() or {}
+            ver = ver_row.get("ver") or "MySQL"
+            cam_cnt = None
+            try:
+                cur.execute("SELECT COUNT(*) AS cnt FROM `tb_camera`")
+                cam_cnt = int((cur.fetchone() or {}).get("cnt") or 0)
+            except Exception:
+                cam_cnt = None
+        extra = f"，检测到 tb_camera 共 {cam_cnt} 条记录" if cam_cnt is not None else ""
+        return {
+            "ok": True,
+            "message": f"连接成功！版本 {ver}（{cfg['host']}:{cfg['port']} / {cfg['database']}{extra}）",
+        }
+    except Exception as exc:
+        return {"ok": False, "message": f"数据库查询异常：{exc}"}
+    finally:
+        conn.close()
+
+
 @router.get("/underwater/ledger")
 def get_underwater_ledger(alert_limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
-    """Read all tables (cameras, alerts, settings, devices) from image_platform MySQL."""
+    """Read all tables (cameras, alerts, settings, devices) from configured underwater MySQL."""
+    cfg = _load_underwater_db_cfg()
+    db_label = f"{cfg['host']}:{cfg['port']} / {cfg['database']}"
+    pub_cfg = _public_underwater_db_cfg(cfg)
     try:
-        conn = _connect_underwater_db()
+        conn = _connect_underwater_db(cfg)
     except Exception:
         return {
             "online": False,
             "error": "连接数据库失败",
+            "database": db_label,
+            "dbConfig": pub_cfg,
             "cameras": [],
             "alerts": [],
             "settings": [],
@@ -315,7 +453,8 @@ def get_underwater_ledger(alert_limit: int = Query(50, ge=1, le=200)) -> dict[st
 
         return {
             "online": True,
-            "database": "192.168.0.33:3306 / image_platform",
+            "database": db_label,
+            "dbConfig": pub_cfg,
             "cameras": cameras,
             "alerts": alerts,
             "settings": settings,
@@ -327,6 +466,8 @@ def get_underwater_ledger(alert_limit: int = Query(50, ge=1, le=200)) -> dict[st
         return {
             "online": False,
             "error": "连接数据库失败",
+            "database": db_label,
+            "dbConfig": pub_cfg,
             "cameras": [],
             "alerts": [],
             "settings": [],

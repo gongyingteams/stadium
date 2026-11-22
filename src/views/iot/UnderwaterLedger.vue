@@ -6,7 +6,7 @@
         <button class="btn-back" @click="$router.push('/iot/underwater-video')">← 返回水下音像采集控制</button>
         <div>
           <h1>水下音像采集识别系统 · 数据库台账与实时报警监测</h1>
-          <p>数据源：192.168.0.33:3306 / image_platform（展示全部库表字段 · 定时轮询新增报警并弹窗预警）</p>
+          <p>数据源：<span class="num-mono">{{ dbSourceText }}</span>（展示全部库表字段 · 定时轮询新增报警并弹窗预警）</p>
         </div>
       </div>
 
@@ -26,6 +26,10 @@
         </div>
 
         <span v-if="lastSyncTime" class="last-sync num-mono">上次刷新：{{ lastSyncTime }}</span>
+        <el-button size="small" @click="openDbConfigDialog">
+          <el-icon style="margin-right: 4px;"><Setting /></el-icon>
+          数据库参数配置
+        </el-button>
         <el-button type="primary" size="small" :loading="loading" @click="fetchLedger(false)">
           立即刷新
         </el-button>
@@ -193,20 +197,97 @@
         <el-button type="primary" @click="alertDialogVisible = false">我知道了</el-button>
       </template>
     </el-dialog>
+
+    <!-- 水下台账 MySQL 数据库参数配置弹窗 -->
+    <el-dialog
+      v-model="dbConfigDialogVisible"
+      title="水下台账数据库连接参数配置 (MySQL)"
+      width="560px"
+      destroy-on-close
+    >
+      <el-form label-position="top" size="default" class="db-cfg-form">
+        <div class="db-grid-2">
+          <el-form-item label="数据库主机 IP / 域名">
+            <el-input v-model="dbForm.host" placeholder="例如 192.168.0.33" clearable />
+          </el-form-item>
+          <el-form-item label="端口">
+            <el-input-number v-model="dbForm.port" :min="1" :max="65535" :controls="false" style="width: 100%;" />
+          </el-form-item>
+        </div>
+
+        <div class="db-grid-2">
+          <el-form-item label="数据库名称">
+            <el-input v-model="dbForm.database" placeholder="例如 image_platform" clearable />
+          </el-form-item>
+          <el-form-item label="字符集">
+            <el-select v-model="dbForm.charset" style="width: 100%;">
+              <el-option label="utf8mb4" value="utf8mb4" />
+              <el-option label="utf8" value="utf8" />
+            </el-select>
+          </el-form-item>
+        </div>
+
+        <div class="db-grid-2">
+          <el-form-item label="数据库用户名">
+            <el-input v-model="dbForm.user" placeholder="例如 user_view" clearable />
+          </el-form-item>
+          <el-form-item label="数据库密码">
+            <el-input
+              v-model="dbForm.password"
+              type="password"
+              show-password
+              :placeholder="dbForm.hasPassword ? '留空表示保持当前已保存密码' : '请输入密码'"
+              clearable
+            />
+          </el-form-item>
+        </div>
+
+        <div v-if="dbTestMessage" :class="['db-test-box', dbTestOk ? 'ok' : 'err']">
+          {{ dbTestMessage }}
+        </div>
+      </el-form>
+
+      <template #footer>
+        <div class="db-dialog-footer">
+          <el-button :loading="testingDb" @click="testDbConnection">测试连接</el-button>
+          <div style="flex: 1;"></div>
+          <el-button @click="dbConfigDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="savingDb" @click="saveDbConfig">保存并立即刷新</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { ElNotification } from 'element-plus'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { Setting } from '@element-plus/icons-vue'
+import { ElMessage, ElNotification } from 'element-plus'
 import { api } from '@/services/api'
 
 const activeTab = ref('cameras')
 const loading = ref(false)
 const dbOnline = ref(false)
 const dbError = ref('')
+const dbSourceText = ref('192.168.0.33:3306 / image_platform')
 const lastSyncTime = ref('')
 const pollSeconds = ref(5)
+
+const dbConfigDialogVisible = ref(false)
+const testingDb = ref(false)
+const savingDb = ref(false)
+const dbTestMessage = ref('')
+const dbTestOk = ref(false)
+
+const dbForm = reactive({
+  host: '192.168.0.33',
+  port: 3306,
+  user: 'user_view',
+  password: '',
+  database: 'image_platform',
+  charset: 'utf8mb4',
+  hasPassword: true
+})
 
 const cameras = ref([])
 const alerts = ref([])
@@ -217,13 +298,98 @@ const latestAlertId = ref(0)
 
 // 新增报警预警弹窗状态
 const alertDialogVisible = ref(false)
-const alertDialogTitle = ref('现场影像报警预警提示')
+const alertDialogTitle = ref('水下影像报警预警提示')
 const activeAlert = ref(null)
 const previewImageUrl = ref('')
 const loadingImage = ref(false)
 
 let lastKnownAlertId = null
 let pollTimer = null
+
+const applyDbConfigToForm = (cfg) => {
+  if (!cfg) return
+  dbForm.host = cfg.host || '192.168.0.33'
+  dbForm.port = Number(cfg.port) || 3306
+  dbForm.user = cfg.user || ''
+  dbForm.password = ''
+  dbForm.database = cfg.database || 'image_platform'
+  dbForm.charset = cfg.charset || 'utf8mb4'
+  dbForm.hasPassword = Boolean(cfg.hasPassword)
+  dbSourceText.value = `${dbForm.host}:${dbForm.port} / ${dbForm.database}`
+}
+
+const openDbConfigDialog = async () => {
+  dbTestMessage.value = ''
+  dbConfigDialogVisible.value = true
+  try {
+    const res = await api.getUnderwaterDbConfig()
+    if (res && !res.__offline && res.config) {
+      applyDbConfigToForm(res.config)
+    }
+  } catch { /* ignore */ }
+}
+
+const buildDbPayload = () => ({
+  host: (dbForm.host || '').trim(),
+  port: Number(dbForm.port) || 3306,
+  user: (dbForm.user || '').trim(),
+  password: dbForm.password,
+  keepPassword: dbForm.password === '' && dbForm.hasPassword,
+  database: (dbForm.database || '').trim(),
+  charset: dbForm.charset || 'utf8mb4'
+})
+
+const testDbConnection = async () => {
+  const payload = buildDbPayload()
+  if (!payload.host || !payload.database) {
+    ElMessage.warning('请填写数据库主机地址和数据库名称')
+    return
+  }
+  testingDb.value = true
+  dbTestMessage.value = ''
+  try {
+    const res = await api.testUnderwaterDbConfig(payload)
+    if (res && !res.__offline) {
+      dbTestOk.value = !!res.ok
+      dbTestMessage.value = res.message || (res.ok ? '连接成功' : '连接失败')
+      if (res.ok) ElMessage.success(dbTestMessage.value)
+      else ElMessage.warning(dbTestMessage.value)
+    } else {
+      dbTestOk.value = false
+      dbTestMessage.value = '后端服务未响应，无法测试数据库连接'
+    }
+  } catch (err) {
+    dbTestOk.value = false
+    dbTestMessage.value = `测试失败：${err?.message || err}`
+  } finally {
+    testingDb.value = false
+  }
+}
+
+const saveDbConfig = async () => {
+  const payload = buildDbPayload()
+  if (!payload.host || !payload.database) {
+    ElMessage.warning('请填写数据库主机地址和数据库名称')
+    return
+  }
+  savingDb.value = true
+  try {
+    const res = await api.saveUnderwaterDbConfig(payload)
+    if (res && !res.__offline && res.ok) {
+      if (res.config) applyDbConfigToForm(res.config)
+      dbConfigDialogVisible.value = false
+      ElMessage.success(res.message || '数据库配置已保存')
+      lastKnownAlertId = null
+      await fetchLedger(false)
+    } else {
+      ElMessage.error(res?.message || '保存数据库配置失败')
+    }
+  } catch (err) {
+    ElMessage.error(`保存失败：${err?.message || err}`)
+  } finally {
+    savingDb.value = false
+  }
+}
 
 const loadAlertImage = async (alertId) => {
   previewImageUrl.value = ''
@@ -246,11 +412,11 @@ const previewAlertImage = async (row) => {
 }
 
 const triggerNewAlertPopup = async (newAlert) => {
-  alertDialogTitle.value = '⚠️ 发现新增现场影像报警预警！'
+  alertDialogTitle.value = '⚠️ 发现新增水下影像报警预警！'
   activeAlert.value = newAlert
   alertDialogVisible.value = true
   ElNotification({
-    title: newAlert.title || '现场影像报警预警',
+    title: newAlert.title || '水下影像报警预警',
     message: `${newAlert.content || ''} (${newAlert.create_time || ''})`,
     type: 'error',
     duration: 6000,
@@ -267,6 +433,8 @@ const fetchLedger = async (silent = true) => {
   try {
     const res = await api.underwaterLedger(50)
     if (!res || res.__offline) return
+    if (res.database) dbSourceText.value = res.database
+    if (res.dbConfig) applyDbConfigToForm(res.dbConfig)
     dbOnline.value = !!res.online
     dbError.value = res.error || ''
     lastSyncTime.value = new Date().toLocaleTimeString()
@@ -438,8 +606,15 @@ onUnmounted(() => {
   object-fit: contain;
 }
 .img-loading { color: #cbd5e1; font-size: 13px; }
+.db-cfg-form { display: flex; flex-direction: column; gap: 4px; }
+.db-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.db-test-box { padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+.db-test-box.ok { background: #ecfdf5; color: #15803d; border: 1px solid #86efac; }
+.db-test-box.err { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.db-dialog-footer { display: flex; align-items: center; gap: 8px; width: 100%; }
 
 @media (max-width: 960px) {
   .ledger-kpis { grid-template-columns: repeat(2, 1fr); }
+  .db-grid-2 { grid-template-columns: 1fr; }
 }
 </style>

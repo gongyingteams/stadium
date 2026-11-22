@@ -406,9 +406,18 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ action, ...payload })
   }),
-  // 水下影像采集识别台账（image_platform MySQL）
+  // 水下影像采集识别台账（MySQL 参数可配置）
   underwaterLedger: (alertLimit = 50) => request(`/video/underwater/ledger?alert_limit=${alertLimit}`),
   underwaterAlertImage: (alertId) => request(`/video/underwater/alert-image/${alertId}`),
+  getUnderwaterDbConfig: () => request('/video/underwater/db-config'),
+  saveUnderwaterDbConfig: (payload) => request('/video/underwater/db-config', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  testUnderwaterDbConfig: (payload) => request('/video/underwater/db-config/test', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
   videoPtz: (payload) => request('/video/ptz', {
     method: 'POST',
     body: JSON.stringify(payload)
