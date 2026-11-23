@@ -65,57 +65,62 @@
       <el-tabs v-model="activeTab" class="ledger-tabs">
         <!-- Tab 1: tb_camera -->
         <el-tab-pane :label="`摄像机台账 tb_camera (${cameras.length})`" name="cameras">
-          <el-table :data="cameras" border stripe size="small" max-height="560" style="width: 100%">
-            <el-table-column prop="id" label="id" width="75" fixed />
-            <el-table-column prop="name" label="name" width="75" fixed />
-            <el-table-column prop="ip" label="ip" width="130" />
-            <el-table-column prop="port" label="port" width="70" />
-            <el-table-column prop="state" label="state" width="85">
+          <el-table :data="cameras" border stripe size="small" max-height="560" empty-text="暂无数据" style="width: 100%">
+            <el-table-column prop="id" label="编号" width="75" fixed />
+            <el-table-column prop="name" label="摄像机名称" width="130" fixed />
+            <el-table-column prop="ip" label="IP 地址" width="130" />
+            <el-table-column prop="port" label="端口" width="70" />
+            <el-table-column prop="state" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.state === 1 ? 'success' : 'info'" size="small">
-                  {{ row.state === 1 ? '1 (启用)' : `${row.state} (停用)` }}
+                  {{ row.state === 1 ? '启用' : '停用' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="group" label="group" width="95" />
-            <el-table-column prop="row" label="row" width="60" />
-            <el-table-column prop="col" label="col" width="60" />
-            <el-table-column prop="hik_user" label="hik_user" width="90" />
-            <el-table-column prop="hik_password" label="hik_password" width="110" />
-            <el-table-column prop="version" label="version" width="75" />
-            <el-table-column prop="bind_device" label="bind_device" width="105" />
-            <el-table-column prop="calibrated" label="calibrated" width="90" />
-            <el-table-column prop="crop_top" label="crop_top" width="85" />
-            <el-table-column prop="crop_bottom" label="crop_bottom" width="100" />
-            <el-table-column prop="crop_left" label="crop_left" width="85" />
-            <el-table-column prop="crop_right" label="crop_right" width="90" />
-            <el-table-column prop="channel" label="channel" width="80" />
-            <el-table-column prop="dist" label="dist" width="80" />
-            <el-table-column prop="frame_rate" label="frame_rate" width="95" />
-            <el-table-column prop="mtx" label="mtx" width="100" show-overflow-tooltip />
-            <el-table-column prop="create_time" label="create_time" width="160" />
-            <el-table-column prop="created_by" label="created_by" width="95" />
-            <el-table-column prop="update_time" label="update_time" width="160" />
-            <el-table-column prop="updated_by" label="updated_by" width="95" />
+            <el-table-column prop="group" label="分组" width="95" />
+            <el-table-column prop="row" label="行号" width="70" />
+            <el-table-column prop="col" label="列号" width="70" />
+            <el-table-column prop="hik_user" label="海康账号" width="100" />
+            <el-table-column prop="hik_password" label="海康密码" width="110" />
+            <el-table-column prop="version" label="版本" width="75" />
+            <el-table-column prop="bind_device" label="绑定外设" width="105" />
+            <el-table-column prop="calibrated" label="标定状态" width="95" />
+            <el-table-column prop="crop_top" label="裁剪上边距" width="105" />
+            <el-table-column prop="crop_bottom" label="裁剪下边距" width="105" />
+            <el-table-column prop="crop_left" label="裁剪左边距" width="105" />
+            <el-table-column prop="crop_right" label="裁剪右边距" width="105" />
+            <el-table-column prop="channel" label="通道号" width="85" />
+            <el-table-column prop="dist" label="距离" width="80" />
+            <el-table-column prop="frame_rate" label="帧率" width="80" />
+            <el-table-column prop="mtx" label="标定矩阵" width="110" show-overflow-tooltip />
+            <el-table-column prop="create_time" label="创建时间" width="160" />
+            <el-table-column prop="created_by" label="创建人" width="95" />
+            <el-table-column prop="update_time" label="更新时间" width="160" />
+            <el-table-column prop="updated_by" label="更新人" width="95" />
           </el-table>
         </el-tab-pane>
 
         <!-- Tab 2: tb_alert_history -->
         <el-tab-pane :label="`报警历史 tb_alert_history (${alertTotal})`" name="alerts">
-          <el-table :data="alerts" border stripe size="small" max-height="560" style="width: 100%">
-            <el-table-column prop="id" label="id" width="80" fixed />
-            <el-table-column prop="title" label="title" width="150" />
-            <el-table-column prop="content" label="content" min-width="220" show-overflow-tooltip />
-            <el-table-column prop="camera_id" label="camera_id" width="95" />
-            <el-table-column prop="camera_group" label="camera_group" width="115" />
-            <el-table-column prop="push_devices" label="push_devices" width="145" />
-            <el-table-column prop="state" label="state" width="75" />
-            <el-table-column prop="push_success" label="push_success" width="105" />
-            <el-table-column prop="create_time" label="create_time" width="165" />
-            <el-table-column prop="created_by" label="created_by" width="95" />
-            <el-table-column prop="update_time" label="update_time" width="165" />
-            <el-table-column prop="updated_by" label="updated_by" width="95" />
-            <el-table-column label="image (抓拍原图)" width="130" fixed="right">
+          <el-table :data="alerts" border stripe size="small" max-height="560" empty-text="暂无数据" style="width: 100%">
+            <el-table-column prop="id" label="编号" width="80" fixed />
+            <el-table-column prop="title" label="报警标题" width="150" />
+            <el-table-column prop="content" label="报警内容" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="camera_id" label="摄像机编号" width="110" />
+            <el-table-column prop="camera_group" label="摄像机分组" width="115" />
+            <el-table-column prop="push_devices" label="推送外设" width="145" />
+            <el-table-column prop="state" label="状态" width="75" />
+            <el-table-column prop="push_success" label="推送结果" width="105">
+              <template #default="{ row }">
+                <el-tag v-if="Number(row.push_success) === 1" type="success" size="small">已推送</el-tag>
+                <el-tag v-else type="danger" size="small">未推送</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="create_time" label="创建时间" width="165" />
+            <el-table-column prop="created_by" label="创建人" width="95" />
+            <el-table-column prop="update_time" label="更新时间" width="165" />
+            <el-table-column prop="updated_by" label="更新人" width="95" />
+            <el-table-column label="抓拍原图" width="130" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="row.has_image"
@@ -134,36 +139,36 @@
 
         <!-- Tab 3: tb_alert_settings -->
         <el-tab-pane :label="`识别参数 tb_alert_settings (${settings.length})`" name="settings">
-          <el-table :data="settings" border stripe size="small" max-height="560" style="width: 100%">
-            <el-table-column prop="id" label="id" width="80" />
-            <el-table-column prop="key" label="key" width="200" />
-            <el-table-column prop="value" label="value" width="180" />
-            <el-table-column prop="desc" label="desc" min-width="180" />
-            <el-table-column prop="state" label="state" width="80" />
-            <el-table-column prop="create_time" label="create_time" width="165" />
-            <el-table-column prop="created_by" label="created_by" width="95" />
-            <el-table-column prop="update_time" label="update_time" width="165" />
-            <el-table-column prop="updated_by" label="updated_by" width="95" />
+          <el-table :data="settings" border stripe size="small" max-height="560" empty-text="暂无数据" style="width: 100%">
+            <el-table-column prop="id" label="编号" width="80" />
+            <el-table-column prop="key" label="参数键名" width="200" />
+            <el-table-column prop="value" label="参数值" width="180" />
+            <el-table-column prop="desc" label="参数说明" min-width="180" />
+            <el-table-column prop="state" label="状态" width="80" />
+            <el-table-column prop="create_time" label="创建时间" width="165" />
+            <el-table-column prop="created_by" label="创建人" width="95" />
+            <el-table-column prop="update_time" label="更新时间" width="165" />
+            <el-table-column prop="updated_by" label="更新人" width="95" />
           </el-table>
         </el-tab-pane>
 
         <!-- Tab 4: tb_device -->
         <el-tab-pane :label="`联动外设 tb_device (${devices.length})`" name="devices">
-          <el-table :data="devices" border stripe size="small" max-height="560" style="width: 100%">
-            <el-table-column prop="id" label="id" width="85" />
-            <el-table-column prop="name" label="name" width="140" />
-            <el-table-column prop="ip" label="ip" width="150" />
-            <el-table-column prop="port" label="port" width="110" />
-            <el-table-column prop="type" label="type" width="80" />
-            <el-table-column prop="state" label="state" width="85">
+          <el-table :data="devices" border stripe size="small" max-height="560" empty-text="暂无数据" style="width: 100%">
+            <el-table-column prop="id" label="编号" width="85" />
+            <el-table-column prop="name" label="设备名称" width="140" />
+            <el-table-column prop="ip" label="IP 地址" width="150" />
+            <el-table-column prop="port" label="端口" width="110" />
+            <el-table-column prop="type" label="设备类型" width="95" />
+            <el-table-column prop="state" label="状态" width="85">
               <template #default="{ row }">
                 <el-tag :type="row.state === 1 ? 'success' : 'info'" size="small">{{ row.state }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="create_time" label="create_time" width="165" />
-            <el-table-column prop="created_by" label="created_by" width="95" />
-            <el-table-column prop="update_time" label="update_time" width="165" />
-            <el-table-column prop="updated_by" label="updated_by" width="95" />
+            <el-table-column prop="create_time" label="创建时间" width="165" />
+            <el-table-column prop="created_by" label="创建人" width="95" />
+            <el-table-column prop="update_time" label="更新时间" width="165" />
+            <el-table-column prop="updated_by" label="更新人" width="95" />
           </el-table>
         </el-tab-pane>
       </el-tabs>

@@ -97,6 +97,7 @@
           >
             <span class="group-tab-name">{{ grp.name }}</span>
             <span class="group-tab-count num-mono">{{ grp.cameras.length }} 路</span>
+            <span v-if="grp.isMock" class="group-tab-mock">模拟</span>
             <span v-if="grp.model || grp.brand" class="group-tab-model">{{ grp.model || grp.brand }}</span>
           </button>
         </div>
@@ -126,6 +127,7 @@
             <span>水下摄像机可按泳道/池区划分为多个分组，每组默认统一品牌型号并支持批量添加机位</span>
             <div class="empty-stage-actions">
               <button class="btn-header-action btn-header-primary" @click="openGroupDialog('add')">+ 新增水下摄像机分组</button>
+              <button class="btn-header-action" @click="loadDemoGroups(true)">载入模拟演示分组</button>
               <button class="btn-header-action" @click="syncGroupsFromLedger(false)">从台账同步分组</button>
             </div>
           </div>
@@ -158,8 +160,26 @@
                 <span>水下视频流重连中...</span>
               </div>
 
+              <!-- 模拟演示水下监控画面（便于无实机时预览分组切屏效果） -->
+              <div v-if="activeGroup?.isMock" class="uw-mock-visual">
+                <div class="uw-water-grid"></div>
+                <div class="uw-caustic-glow"></div>
+                <div class="cam-corner top-left mock-badge">UNDERWATER DEMO</div>
+                <div class="cam-corner top-right num-mono">
+                  {{ cam.depth ? `水深 ${cam.depth} · ` : '' }}{{ activeGroup?.fps || 25 }} FPS
+                </div>
+                <div class="uw-center-reticle">
+                  <span class="uw-reticle-label num-mono">{{ cam.ip }}</span>
+                </div>
+                <div class="bottom-osd num-mono">
+                  <span class="osd-preset">{{ cam.maskedUrl }}</span>
+                  <span class="rec-dot demo-dot">● SIM</span>
+                  <span>{{ liveTime }}</span>
+                </div>
+              </div>
+
               <!-- 实时画面 (RTSP 转码 MJPEG / HTTP / HLS) -->
-              <div v-if="cam.livePlayUrl" class="live-video-wrap ip-live-wrap">
+              <div v-else-if="cam.livePlayUrl" class="live-video-wrap ip-live-wrap">
                 <img
                   v-if="cam.playType === 'mjpeg'"
                   :src="cam.livePlayUrl"
@@ -495,6 +515,55 @@ import { api, API_BASE_URL } from '@/services/api'
 
 const UNDERWATER_GROUPS_STORAGE_KEY = 'venue_underwater_camera_groups_v1'
 
+const DEMO_UNDERWATER_GROUPS = [
+  {
+    id: 'uw-demo-grp-1',
+    name: '比赛池水下 1 组（1~4 泳道）',
+    brandPreset: 'hikvision',
+    brand: '海康威视',
+    model: '海康威视 DS-2CD 水下摄像机',
+    protocol: 'rtsp',
+    pathTemplate: '/Streaming/Channels/101',
+    username: '',
+    password: '',
+    resolution: '1920×1080',
+    fps: 30,
+    bitrate: '6 Mbps',
+    ptzPort: 1259,
+    isMock: true,
+    cameras: [
+      { id: 'uw-demo-101', name: '水下 01 · 1~2 道出发端', ip: '192.168.7.171', customPath: '', depth: '1.8m' },
+      { id: 'uw-demo-102', name: '水下 02 · 3~4 道出发端', ip: '192.168.7.172', customPath: '', depth: '1.8m' },
+      { id: 'uw-demo-103', name: '水下 03 · 1~2 道转身端', ip: '192.168.7.173', customPath: '', depth: '2.0m' },
+      { id: 'uw-demo-104', name: '水下 04 · 3~4 道转身端', ip: '192.168.7.174', customPath: '', depth: '2.0m' }
+    ]
+  },
+  {
+    id: 'uw-demo-grp-2',
+    name: '跳水深水池水下 2 组',
+    brandPreset: 'dahua',
+    brand: '大华',
+    model: '大华 DH-IPC 水下高速机',
+    protocol: 'rtsp',
+    pathTemplate: '/cam/realmonitor?channel=1&subtype=0',
+    username: '',
+    password: '',
+    resolution: '3840×2160',
+    fps: 60,
+    bitrate: '8 Mbps',
+    ptzPort: 1259,
+    isMock: true,
+    cameras: [
+      { id: 'uw-demo-201', name: '跳水池 01 · 10米台落水区东', ip: '192.168.7.181', customPath: '', depth: '4.5m' },
+      { id: 'uw-demo-202', name: '跳水池 02 · 10米台落水区西', ip: '192.168.7.182', customPath: '', depth: '4.5m' },
+      { id: 'uw-demo-203', name: '跳水池 03 · 3米板正面窗', ip: '192.168.7.183', customPath: '', depth: '3.2m' },
+      { id: 'uw-demo-204', name: '跳水池 04 · 3米板侧面窗', ip: '192.168.7.184', customPath: '', depth: '3.2m' },
+      { id: 'uw-demo-205', name: '跳水池 05 · 池底全景仰拍东', ip: '192.168.7.185', customPath: '', depth: '5.5m' },
+      { id: 'uw-demo-206', name: '跳水池 06 · 池底全景仰拍西', ip: '192.168.7.186', customPath: '', depth: '5.5m' }
+    ]
+  }
+]
+
 const BRAND_PRESETS = [
   {
     key: 'hikvision',
@@ -658,19 +727,21 @@ const hydrateGroup = (rawGrp, bustCache = false) => {
     resolution: rawGrp.resolution || '1920×1080',
     fps: Number(rawGrp.fps) || 25,
     bitrate: rawGrp.bitrate || '6 Mbps',
-    ptzPort: Number(rawGrp.ptzPort) || 1259
+    ptzPort: Number(rawGrp.ptzPort) || 1259,
+    isMock: Boolean(rawGrp.isMock)
   }
   const camList = Array.isArray(rawGrp.cameras) ? rawGrp.cameras : []
   grpCfg.cameras = camList.map((c, idx) => {
     const ip = (c.ip || '').trim()
     const customPath = (c.customPath || '').trim()
     const streamUrl = buildCamStreamUrl(grpCfg, { ip, customPath }) || c.streamUrl || ''
-    const playCfg = makePlayConfig(streamUrl, grpCfg.protocol, bustCache)
+    const playCfg = grpCfg.isMock ? { playType: 'mjpeg', livePlayUrl: '' } : makePlayConfig(streamUrl, grpCfg.protocol, bustCache)
     return {
       id: c.id || `${grpCfg.id}-cam-${idx + 1}`,
       name: (c.name || '').trim() || `水下机位 ${String(idx + 1).padStart(2, '0')} (${ip || '未填IP'})`,
       ip,
       customPath,
+      depth: c.depth || '',
       streamUrl,
       maskedUrl: maskUrl(streamUrl),
       isReconnecting: false,
@@ -696,15 +767,27 @@ const saveGroupsToStorage = () => {
       fps: g.fps,
       bitrate: g.bitrate,
       ptzPort: g.ptzPort,
+      isMock: Boolean(g.isMock),
       cameras: g.cameras.map(c => ({
         id: c.id,
         name: c.name,
         ip: c.ip,
-        customPath: c.customPath || ''
+        customPath: c.customPath || '',
+        depth: c.depth || ''
       }))
     }))
     localStorage.setItem(UNDERWATER_GROUPS_STORAGE_KEY, JSON.stringify(payload))
   } catch { /* ignore */ }
+}
+
+const loadDemoGroups = (showToast = false) => {
+  groups.value = DEMO_UNDERWATER_GROUPS.map(g => hydrateGroup(g))
+  activeGroupId.value = groups.value[0]?.id || ''
+  selectedCamId.value = groups.value[0]?.cameras[0]?.id ?? null
+  saveGroupsToStorage()
+  if (showToast) {
+    ElMessage.success(`已载入 ${groups.value.length} 组水下摄像机模拟演示数据`)
+  }
 }
 
 const loadGroupsFromStorage = () => {
@@ -712,7 +795,7 @@ const loadGroupsFromStorage = () => {
     const raw = localStorage.getItem(UNDERWATER_GROUPS_STORAGE_KEY)
     if (raw === null) return false
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return false
+    if (!Array.isArray(parsed) || parsed.length === 0) return false
     groups.value = parsed.map(g => hydrateGroup(g))
     if (groups.value.length) {
       activeGroupId.value = groups.value[0].id
@@ -1196,8 +1279,8 @@ const snapshotAll = () => {
 onMounted(() => {
   const loaded = loadGroupsFromStorage()
   if (!loaded) {
-    // 首次进入且无本地分组配置时，尝试静默从水下台账按分组加载真实摄像机
-    syncGroupsFromLedger(true)
+    // 无本地分组配置时，默认载入模拟演示分组，便于页面效果预览与开发调试
+    loadDemoGroups(false)
   }
   liveTime.value = new Date().toLocaleTimeString()
   timer = setInterval(() => {
@@ -1258,6 +1341,8 @@ h3 { font-size: 15px; line-height: 1.35; }
 .group-tab-name { font-weight: 700; }
 .group-tab-count { padding: 1px 6px; border-radius: 10px; background: rgba(var(--th-shadow-rgb), 0.08); font-size: 12px; font-weight: 700; }
 .group-tab-btn.active .group-tab-count { background: rgba(255, 255, 255, 0.22); color: #FFFFFF; }
+.group-tab-mock { padding: 1px 5px; border-radius: 4px; background: var(--do-warning-bg); color: var(--do-warning-deep); border: 1px solid var(--do-warning-border); font-size: 11px; font-weight: 700; }
+.group-tab-btn.active .group-tab-mock { background: rgba(255, 255, 255, 0.2); color: #FFFFFF; border-color: rgba(255, 255, 255, 0.38); }
 .group-tab-model { font-size: 12px; color: var(--do-text-secondary); }
 .group-tab-btn.active .group-tab-model { color: rgba(255, 255, 255, 0.88); }
 .group-empty-hint { font-size: 13px; color: var(--do-text-secondary); padding: 4px 0; }
@@ -1300,6 +1385,13 @@ h3 { font-size: 15px; line-height: 1.35; }
 .ip-live-wrap { display: flex; align-items: center; justify-content: center; }
 .live-video-el { width: 100%; height: 100%; object-fit: contain; display: block; }
 .cam-corner.live-badge { padding: 2px 6px; border-radius: 4px; background: rgba(16, 185, 129, 0.85); color: #fff; font-weight: 700; }
+.cam-corner.mock-badge { padding: 2px 6px; border-radius: 4px; background: rgba(14, 165, 233, 0.85); color: #fff; font-weight: 700; }
+.uw-mock-visual { position: relative; flex: 1; min-width: 0; overflow: hidden; background: radial-gradient(circle at 50% 20%, rgba(14, 165, 233, 0.32) 0%, #0a2540 55%, #061529 100%); }
+.uw-water-grid { position: absolute; inset: 0; opacity: 0.16; background: linear-gradient(rgba(125, 211, 252, 0.65) 1px, transparent 1px), linear-gradient(90deg, rgba(125, 211, 252, 0.65) 1px, transparent 1px); background-size: 36px 36px; }
+.uw-caustic-glow { position: absolute; inset: 0; background: linear-gradient(160deg, rgba(56, 189, 248, 0.16) 0%, transparent 45%, rgba(6, 182, 212, 0.14) 100%); pointer-events: none; }
+.uw-center-reticle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 8px 14px; border: 1px dashed rgba(125, 211, 252, 0.45); border-radius: 8px; background: rgba(6, 21, 41, 0.45); color: rgba(224, 242, 254, 0.9); font-size: 12px; }
+.uw-reticle-label { letter-spacing: 0.4px; }
+.rec-dot.demo-dot { color: #38bdf8; }
 .mock-cam-visual { position: relative; flex: 1; min-width: 0; overflow: hidden; background: radial-gradient(circle, rgba(var(--th-accent-rgb), 0.14) 0%, var(--do-bg-dark) 78%); }
 .cam-grid-lines { position: absolute; inset: 0; opacity: 0.14; background: linear-gradient(rgba(255, 255, 255, 0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.6) 1px, transparent 1px); background-size: 34px 34px; }
 .cam-corner { position: absolute; z-index: 1; color: rgba(255, 255, 255, 0.62); font-size: 11px; letter-spacing: 0.5px; }
