@@ -33,3 +33,7 @@ backend/.env
 # 系统
 Thumbs.db
 .DS_Store
+
+# 水下分组共享配置 / 视频回放数据源（运行时生成，含共享凭据，不入库）
+backend/data/underwater_groups.json
+backend/data/video_replay_config.json

@@ -41,7 +41,11 @@
       <div class="metric-card glass-panel"><span>视窗布局</span><strong class="num-mono">{{ splitMode }} 分屏</strong><em>点击视窗可选中机位</em></div>
       <div class="metric-card glass-panel"><span>在线机位</span><strong class="num-mono">{{ onlineCamCount }}/{{ cameras.length }}</strong><em>RTSP 链路健康</em></div>
       <div class="metric-card glass-panel"><span>推流带宽</span><strong class="num-mono">{{ totalBitrate }} Mbps</strong><em>当前展示视窗合计</em></div>
-      <div class="metric-card glass-panel"><span>断流自愈</span><strong class="num-mono">{{ reconnectingCount }} 路</strong><em>自动重连守护中</em></div>
+      <div class="metric-card glass-panel clickable-card" @click="openReplayPanel" :title="`视频回放数据源：${replayHostDisplay} · 点击浏览局域网共享主机上的录像文件`">
+        <span>视频回放</span>
+        <strong class="num-mono">{{ replayHostDisplay }}</strong>
+        <em>共享录像 · 点击浏览</em>
+      </div>
       <div class="metric-card glass-panel clickable-card" @click="openSnapshotGallery" :title="`点击查看全部抓拍截图 · 保存目录：${snapshotStorageDir}`">
         <span>抓拍归档</span>
         <strong class="num-mono">{{ snapshots.length }} 张</strong>
@@ -109,7 +113,8 @@
           <div
             v-for="cam in displayedCameras"
             :key="cam.id"
-            :class="['cam-viewport', { selected: selectedCamId === cam.id }]"
+            :ref="(el) => setViewportElRef(cam.id, el)"
+            :class="['cam-viewport', { selected: selectedCamId === cam.id, 'is-fullscreen': fullscreenCamId === cam.id }]"
             @click="selectedCamId = cam.id"
           >
             <!-- 视窗 OSD 顶栏 -->
@@ -120,8 +125,8 @@
               <span :class="['status-dot', cam.isReconnecting ? 'warning' : 'online']"></span>
             </div>
 
-            <!-- 视频画面渲染区 -->
-            <div class="cam-feed-area">
+            <!-- 视频画面渲染区（双击可全屏/缩小） -->
+            <div class="cam-feed-area" @dblclick.stop="toggleCamFullscreen(cam)">
               <div v-if="cam.isReconnecting" class="reconnecting-overlay">
                 <el-icon class="is-loading"><Loading /></el-icon>
                 <span>网络断流自愈重连中...</span>
@@ -178,6 +183,14 @@
               </button>
               <button class="tool-btn" @click.stop="triggerPtzPreset(cam)">看位</button>
               <button class="tool-btn" @click.stop="reconnectCam(cam)">重拉流</button>
+              <button
+                :class="['tool-btn', 'tool-btn-fs', { active: fullscreenCamId === cam.id }]"
+                :title="fullscreenCamId === cam.id ? '缩小恢复分屏视窗 (ESC)' : '全屏放大查看当前画面（支持双击画面）'"
+                @click.stop="toggleCamFullscreen(cam)"
+              >
+                <el-icon><ScaleToOriginal v-if="fullscreenCamId === cam.id" /><FullScreen v-else /></el-icon>
+                <span>{{ fullscreenCamId === cam.id ? '缩小' : '全屏' }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -466,12 +479,99 @@
         </div>
       </template>
     </el-dialog>
+    <!-- 视频回放抽屉：局域网 SMB 共享盘数据源配置 + 录像浏览回放 -->
+    <el-drawer v-model="replayDrawerVisible" title="视频回放 · 局域网共享录像" size="560px" destroy-on-close>
+      <div class="replay-panel">
+        <!-- 数据源配置区 -->
+        <div class="replay-cfg-box">
+          <div class="replay-cfg-head">
+            <strong>回放数据源（局域网共享主机）</strong>
+            <span v-if="replayCfgHasPassword" class="replay-pwd-tag">已存凭据</span>
+          </div>
+          <div class="replay-cfg-grid">
+            <el-form-item label="共享主机 IP">
+              <el-input v-model="replayCfgForm.host" placeholder="如 192.168.0.33" clearable />
+            </el-form-item>
+            <el-form-item label="SMB 端口">
+              <el-input-number v-model="replayCfgForm.port" :min="1" :max="65535" :controls="false" style="width: 100%;" />
+            </el-form-item>
+            <el-form-item label="共享名">
+              <el-input v-model="replayCfgForm.share" placeholder="如 video / 共享盘对应的共享名称" clearable />
+            </el-form-item>
+            <el-form-item label="起始子目录">
+              <el-input v-model="replayCfgForm.rootPath" placeholder="留空从共享根目录开始，如 录像\游泳池" clearable />
+            </el-form-item>
+            <el-form-item label="账号（可选）">
+              <el-input v-model="replayCfgForm.username" placeholder="共享允许匿名访问时留空" clearable />
+            </el-form-item>
+            <el-form-item label="密码（可选）">
+              <el-input v-model="replayCfgForm.password" type="password" show-password
+                :placeholder="replayCfgHasPassword ? '已保存，留空表示不修改' : '共享允许匿名访问时留空'" clearable />
+            </el-form-item>
+          </div>
+          <div class="replay-cfg-ops">
+            <el-button size="small" :loading="replayTesting" @click="testReplayConfig">测试连接</el-button>
+            <el-button size="small" type="primary" @click="saveReplayConfig">保存配置</el-button>
+            <el-button size="small" :loading="replayLoadingFiles" @click="loadReplayFiles(replayPath)">刷新目录</el-button>
+          </div>
+        </div>
+
+        <!-- 当前路径面包屑 -->
+        <div class="replay-pathbar">
+          <span class="replay-path-lbl">当前目录：</span>
+          <template v-for="(crumb, idx) in replayBreadcrumbs" :key="idx">
+            <span v-if="idx > 0" class="replay-path-sep">\</span>
+            <button class="replay-crumb-btn" @click="gotoReplayCrumb(crumb)">{{ crumb.name }}</button>
+          </template>
+          <span class="replay-count-tag num-mono">本层 {{ replayVideoStats }} 段视频</span>
+        </div>
+
+        <!-- 文件列表 -->
+        <div v-if="replayLoadingFiles" class="replay-empty">正在读取共享目录...</div>
+        <div v-else-if="replayError" class="replay-empty replay-error">{{ replayError }}</div>
+        <div v-else-if="!replayEntries.length" class="replay-empty">共享目录为空，或该目录下没有子目录与文件</div>
+        <div v-else class="replay-list">
+          <div
+            v-for="entry in replayEntries"
+            :key="entry.name"
+            :class="['replay-row', { 'is-dir': entry.isDir, 'is-video': entry.isVideo, 'is-other': !entry.isDir && !entry.isVideo }]"
+            @click="entry.isDir ? enterReplayDir(entry) : playReplayFile(entry)"
+          >
+            <span class="replay-row-icon">{{ entry.isDir ? '📁' : (entry.isVideo ? '🎬' : '📄') }}</span>
+            <span class="replay-row-name" :title="entry.name">{{ entry.name }}</span>
+            <span class="replay-row-meta num-mono">{{ entry.mtime }}</span>
+            <span class="replay-row-size num-mono">{{ entry.isDir ? '' : formatBytes(entry.size) }}</span>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
+
+    <!-- 视频回放播放器 -->
+    <el-dialog v-model="replayPlayerVisible" :title="`视频回放 · ${replayPlaying?.name || ''}`" width="900px" destroy-on-close
+      @closed="replayPlaying = null" append-to-body>
+      <div v-if="replayPlaying" class="replay-player-wrap">
+        <video :src="replayPlaying.url" controls autoplay class="replay-player-video" />
+        <div class="replay-player-meta">
+          <div class="preview-meta-row"><span>文件名称</span><strong class="num-mono">{{ replayPlaying.name }}</strong></div>
+          <div class="preview-meta-row"><span>文件大小</span><strong class="num-mono">{{ formatBytes(replayPlaying.size) }}</strong></div>
+          <div class="preview-meta-row"><span>修改时间</span><strong class="num-mono">{{ replayPlaying.mtime }}</strong></div>
+          <div class="preview-meta-row"><span>数据来源</span><strong class="num-mono">{{ replayHostDisplay }}</strong></div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-footer-bar">
+          <el-button @click="copyReplayUrl">复制回放地址</el-button>
+          <div style="flex: 1;"></div>
+          <el-button type="primary" @click="replayPlayerVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { Loading, Setting, Refresh } from '@element-plus/icons-vue'
+import { Loading, Setting, Refresh, FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { api, API_BASE_URL } from '@/services/api'
@@ -873,9 +973,73 @@ const removeCustomCamera = (cam) => {
   ElMessage.info(`已移除摄像机「${cam.name}」`)
 }
 
+// ===== 单路视窗全屏 / 缩小 =====
+const viewportElMap = new Map()
+const fullscreenCamId = ref(null)
+
+const setViewportElRef = (camId, el) => {
+  if (el) {
+    viewportElMap.set(camId, el)
+  } else {
+    viewportElMap.delete(camId)
+  }
+}
+
+const exitCamFullscreen = async () => {
+  if (document.fullscreenElement) {
+    try {
+      await document.exitFullscreen()
+    } catch { /* ignore */ }
+  }
+  fullscreenCamId.value = null
+}
+
+const toggleCamFullscreen = async (cam) => {
+  if (!cam) return
+  if (fullscreenCamId.value === cam.id) {
+    await exitCamFullscreen()
+    return
+  }
+  selectedCamId.value = cam.id
+  fullscreenCamId.value = cam.id
+  const el = viewportElMap.get(cam.id)
+  if (el && typeof el.requestFullscreen === 'function') {
+    try {
+      await el.requestFullscreen()
+    } catch {
+      // 原生全屏不可用时自动降级为网页内全屏 (.is-fullscreen)
+    }
+  }
+}
+
+const handleFullscreenChange = () => {
+  if (!document.fullscreenElement) {
+    fullscreenCamId.value = null
+  }
+}
+
+const handleKeydownEsc = (e) => {
+  if (e.key === 'Escape' && fullscreenCamId.value !== null && !document.fullscreenElement) {
+    fullscreenCamId.value = null
+  }
+}
+
 onMounted(() => {
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
+  window.addEventListener('keydown', handleKeydownEsc)
   initCameras()
   loadSnapshots()
+  // 预取视频回放数据源配置，用于指标卡显示（共享未配置时显示「未配置」）
+  api.videoReplayConfig().then(res => {
+    if (res && !res.__offline && res.config) {
+      replayCfgForm.host = res.config.host || '192.168.0.33'
+      replayCfgForm.port = Number(res.config.port) || 445
+      replayCfgForm.share = res.config.share || ''
+      replayCfgForm.rootPath = res.config.rootPath || ''
+      replayCfgForm.username = res.config.username || ''
+      replayCfgHasPassword.value = Boolean(res.config.hasPassword)
+    }
+  }).catch(() => {})
   liveTime.value = new Date().toLocaleTimeString()
   timer = setInterval(() => {
     liveTime.value = new Date().toLocaleTimeString()
@@ -883,6 +1047,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  window.removeEventListener('keydown', handleKeydownEsc)
+  exitCamFullscreen()
   if (timer) clearInterval(timer)
 })
 
@@ -891,7 +1058,184 @@ const displayedCameras = computed(() => {
 })
 
 const onlineCamCount = computed(() => cameras.value.filter(cam => !cam.isReconnecting).length)
-const reconnectingCount = computed(() => cameras.value.filter(cam => cam.isReconnecting).length)
+// ===== 视频回放（局域网 SMB 共享盘数据源） =====
+const replayDrawerVisible = ref(false)
+const replayTesting = ref(false)
+const replayCfgLoading = ref(false)
+const replayCfgHasPassword = ref(false)
+const replayCfgForm = reactive({
+  host: '192.168.0.33',
+  port: 445,
+  share: '',
+  rootPath: '',
+  username: '',
+  password: ''
+})
+const replayPath = ref('')          // 当前所在共享目录的相对路径
+const replayEntries = ref([])
+const replayLoadingFiles = ref(false)
+const replayError = ref('')
+const replayPlayerVisible = ref(false)
+const replayPlaying = ref(null)     // { name, url, size }
+
+const replayHostDisplay = computed(() => {
+  const h = (replayCfgForm.host || '').trim()
+  const s = (replayCfgForm.share || '').trim()
+  return h ? (s ? `${h} · ${s}` : h) : '未配置'
+})
+
+const replayBreadcrumbs = computed(() => {
+  const segs = (replayPath.value || '').split(/[\\/]+/).filter(Boolean)
+  const crumbs = [{ name: '共享根目录', path: '' }]
+  let acc = ''
+  for (const s of segs) {
+    acc = acc ? `${acc}\\${s}` : s
+    crumbs.push({ name: s, path: acc })
+  }
+  return crumbs
+})
+
+const replayVideoStats = computed(() => replayEntries.value.filter(e => e.isVideo).length)
+
+const openReplayPanel = () => {
+  replayDrawerVisible.value = true
+  loadReplayConfig()
+}
+
+const loadReplayConfig = async () => {
+  replayCfgLoading.value = true
+  try {
+    const res = await api.videoReplayConfig()
+    if (res && !res.__offline && res.config) {
+      replayCfgForm.host = res.config.host || '192.168.0.33'
+      replayCfgForm.port = Number(res.config.port) || 445
+      replayCfgForm.share = res.config.share || ''
+      replayCfgForm.rootPath = res.config.rootPath || ''
+      replayCfgForm.username = res.config.username || ''
+      replayCfgForm.password = ''
+      replayCfgHasPassword.value = Boolean(res.config.hasPassword)
+    }
+  } catch (err) {
+    ElMessage.error(`读取回放数据源配置失败：${err?.message || err}`)
+  } finally {
+    replayCfgLoading.value = false
+  }
+  if ((replayCfgForm.share || '').trim()) {
+    loadReplayFiles('')
+  }
+}
+
+const saveReplayConfig = async () => {
+  if (!(replayCfgForm.share || '').trim()) {
+    ElMessage.warning('请填写共享名（如共享盘符对应的共享名称）')
+    return
+  }
+  const keepPassword = !replayCfgForm.password
+  try {
+    const res = await api.saveVideoReplayConfig({
+      host: replayCfgForm.host,
+      port: replayCfgForm.port,
+      share: replayCfgForm.share,
+      rootPath: replayCfgForm.rootPath,
+      username: replayCfgForm.username,
+      password: keepPassword ? '' : replayCfgForm.password,
+      keepPassword
+    })
+    if (res && !res.__offline) {
+      ElMessage.success(res.message || '回放数据源配置已保存')
+      replayCfgHasPassword.value = Boolean(res.config?.hasPassword)
+      loadReplayFiles('')
+    } else {
+      ElMessage.warning('后端不可达，配置未保存至服务器')
+    }
+  } catch (err) {
+    ElMessage.error(`保存回放数据源配置失败：${err?.message || err}`)
+  }
+}
+
+const testReplayConfig = async () => {
+  if (!(replayCfgForm.host || '').trim()) {
+    ElMessage.warning('请填写共享主机 IP')
+    return
+  }
+  if (!(replayCfgForm.share || '').trim()) {
+    ElMessage.warning('请填写共享名')
+    return
+  }
+  replayTesting.value = true
+  try {
+    const keepPassword = !replayCfgForm.password
+    const res = await api.testVideoReplayConfig({
+      host: replayCfgForm.host,
+      port: replayCfgForm.port,
+      share: replayCfgForm.share,
+      rootPath: replayCfgForm.rootPath,
+      username: replayCfgForm.username,
+      password: keepPassword ? '' : replayCfgForm.password,
+      keepPassword
+    })
+    if (res && res.ok) {
+      ElMessage.success(res.message || '共享连接正常')
+    } else {
+      ElMessage.error(res?.message || '访问共享失败')
+    }
+  } catch (err) {
+    ElMessage.error(`共享探测失败：${err?.message || err}`)
+  } finally {
+    replayTesting.value = false
+  }
+}
+
+const loadReplayFiles = async (dirPath) => {
+  if (!(replayCfgForm.share || '').trim()) return
+  replayLoadingFiles.value = true
+  replayError.value = ''
+  try {
+    const res = await api.listVideoReplayFiles(dirPath)
+    if (res && !res.__offline) {
+      replayEntries.value = res.entries || []
+      replayPath.value = res.path || dirPath || ''
+      if (res.ok === false) replayError.value = res.error || '读取共享目录失败'
+    } else {
+      replayEntries.value = []
+      replayError.value = '后端不可达，无法读取共享目录'
+    }
+  } catch (err) {
+    replayEntries.value = []
+    replayError.value = `读取共享目录失败：${err?.message || err}`
+  } finally {
+    replayLoadingFiles.value = false
+  }
+}
+
+const enterReplayDir = (entry) => {
+  if (!entry || !entry.isDir) return
+  const next = replayPath.value ? `${replayPath.value}\\${entry.name}` : entry.name
+  loadReplayFiles(next)
+}
+
+const gotoReplayCrumb = (crumb) => {
+  if (crumb.path === replayPath.value) return
+  loadReplayFiles(crumb.path)
+}
+
+const buildReplayFileUrl = (entry) => {
+  const rel = replayPath.value ? `${replayPath.value}\\${entry.name}` : entry.name
+  const base = API_BASE_URL.replace(/\/$/, '')
+  return `${base}/video/replay/file?path=${encodeURIComponent(rel)}`
+}
+
+const playReplayFile = (entry) => {
+  if (!entry || !entry.isVideo) return
+  replayPlaying.value = { name: entry.name, url: buildReplayFileUrl(entry), size: entry.size, mtime: entry.mtime }
+  replayPlayerVisible.value = true
+}
+
+const copyReplayUrl = () => {
+  if (!replayPlaying.value) return
+  copyText(replayPlaying.value.url, '回放地址')
+}
+
 const totalBitrate = computed(() =>
   displayedCameras.value.reduce((sum, cam) => sum + (Number(String(cam.bitrate).split(' ')[0]) || 0), 0)
 )
@@ -1226,6 +1570,8 @@ h3 { font-size: 15px; line-height: 1.35; }
 .cam-viewport { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; background: var(--do-bg-dark); border: 1px solid var(--do-border); border-radius: 8px; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
 .cam-viewport:hover { border-color: var(--do-gold); box-shadow: var(--shadow-hover); }
 .cam-viewport.selected { border-color: var(--do-gold); box-shadow: inset 0 0 0 1.5px var(--do-gold), 0 0 0 3px rgba(var(--th-accent-rgb), 0.18); }
+.cam-viewport.is-fullscreen,
+.cam-viewport:fullscreen { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100vh; border: none; border-radius: 0; box-shadow: none; background: #000; }
 
 .cam-osd-header { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: rgba(var(--th-shadow-rgb), 0.92); border-bottom: 1px solid rgba(var(--th-accent-rgb), 0.18); flex-shrink: 0; }
 .cam-title { flex: 1; min-width: 0; overflow: hidden; color: var(--do-text-inverse); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -1250,9 +1596,11 @@ h3 { font-size: 15px; line-height: 1.35; }
 
 .reconnecting-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(24, 17, 11, 0.88); color: var(--do-warning); font-size: 13px; font-weight: 600; }
 
-.cam-foot-tools { display: flex; gap: 6px; justify-content: flex-end; padding: 5px 9px; background: rgba(var(--th-shadow-rgb), 0.95); flex-shrink: 0; }
+.cam-foot-tools { display: flex; gap: 6px; justify-content: flex-end; align-items: center; padding: 5px 9px; background: rgba(var(--th-shadow-rgb), 0.95); flex-shrink: 0; }
 .tool-btn { padding: 3px 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(var(--th-accent-rgb), 0.3); border-radius: 4px; color: var(--do-text-inverse); font-size: 12px; cursor: pointer; transition: all 0.2s ease; }
 .tool-btn:hover { background: var(--do-gold); border-color: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.28); }
+.tool-btn-fs { display: inline-flex; align-items: center; gap: 4px; }
+.tool-btn-fs.active { background: var(--do-gold); border-color: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.32); }
 
 /* ===== 右侧控制栏 ===== */
 .video-side { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -1335,6 +1683,39 @@ h3 { font-size: 15px; line-height: 1.35; }
 .snapshot-preview-meta { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--do-bg-sunken); border: 1px solid var(--do-border); border-radius: 8px; }
 .preview-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--do-text-secondary); flex-wrap: wrap; }
 .preview-meta-row strong { color: var(--do-text-primary); }
+
+/* ===== 视频回放抽屉 ===== */
+.replay-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.replay-cfg-box { padding: 14px; border: 1px solid var(--do-border); border-radius: 10px; background: var(--do-bg-sunken); }
+.replay-cfg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; color: var(--do-text-primary); }
+.replay-pwd-tag { padding: 2px 8px; border-radius: 10px; background: var(--do-gold-wash); border: 1px solid var(--do-border); color: var(--do-gold); font-size: 12px; }
+.replay-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.replay-cfg-grid .el-form-item { margin-bottom: 12px; }
+.replay-cfg-grid .el-form-item:has(> .el-input-number) { min-width: 0; }
+.replay-cfg-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+.replay-pathbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 10px 12px; border: 1px solid var(--do-border); border-radius: 8px; background: var(--do-bg-card); font-size: 13px; }
+.replay-path-lbl { color: var(--do-text-secondary); flex-shrink: 0; }
+.replay-crumb-btn { padding: 2px 6px; border: 0; background: transparent; color: var(--do-gold); font-size: 13px; cursor: pointer; border-radius: 4px; }
+.replay-crumb-btn:hover { background: var(--do-gold-wash); }
+.replay-path-sep { color: var(--do-text-secondary); }
+.replay-count-tag { margin-left: auto; padding: 2px 8px; border-radius: 10px; background: var(--do-bg-sunken); border: 1px solid var(--do-border); color: var(--do-text-secondary); font-size: 12px; white-space: nowrap; }
+.replay-empty { padding: 32px 16px; text-align: center; color: var(--do-text-secondary); font-size: 13.5px; background: var(--do-bg-sunken); border: 1px dashed var(--do-border); border-radius: 8px; }
+.replay-error { color: var(--do-danger, #d9534f); }
+.replay-list { display: flex; flex-direction: column; border: 1px solid var(--do-border); border-radius: 8px; overflow: hidden; }
+.replay-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 116px 82px; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--do-border); cursor: pointer; font-size: 13.5px; transition: background 0.15s; }
+.replay-row:last-child { border-bottom: 0; }
+.replay-row:hover { background: var(--do-gold-wash); }
+.replay-row.is-dir { color: var(--do-text-primary); font-weight: 600; }
+.replay-row.is-video { color: var(--do-text-primary); }
+.replay-row.is-other { color: var(--do-text-secondary); cursor: default; opacity: 0.75; }
+.replay-row.is-other:hover { background: transparent; }
+.replay-row-icon { text-align: center; }
+.replay-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replay-row-meta { color: var(--do-text-secondary); font-size: 12px; text-align: right; }
+.replay-row-size { color: var(--do-text-secondary); font-size: 12px; text-align: right; }
+.replay-player-wrap { display: flex; flex-direction: column; gap: 12px; }
+.replay-player-video { width: 100%; max-height: 62vh; background: #000; border-radius: 8px; }
+.replay-player-meta { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--do-border); border-radius: 8px; background: var(--do-bg-sunken); }
 
 /* ===== 响应式断点：与 大屏调度 页同级阶梯，任意分辨率不变形、不撑破主容器 ===== */
 @media (max-width: 1600px) {

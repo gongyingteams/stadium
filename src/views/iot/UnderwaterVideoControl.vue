@@ -8,7 +8,7 @@
           <div class="title-row">
             <h1>水下音像采集控制总控台</h1>
           </div>
-          <p>水下多机位分组实时监看 · 点击分组整组切屏 · 同型号分组参数统一配置与云台操控</p>
+          <p>水下多机位分组实时监看 · 点击分组整组切屏 </p>
         </div>
       </div>
       <div class="header-status">
@@ -75,19 +75,30 @@
 
     <!-- 水下摄像机分组切换栏 + 视窗布局控制 -->
     <section class="scene-toolbar glass-panel">
-      <div class="group-bar-main">
-        <div class="group-bar-head">
-          <div>
-            <h2>水下摄像机分组切换</h2>
+      <div class="toolbar-top">
+        <div class="toolbar-title-group">
+          <span class="toolbar-accent-bar"></span>
+          <div class="toolbar-title-text">
+            <div class="toolbar-title-line">
+              <h2>水下摄像机分组切换</h2>
+              <span class="toolbar-count-pill num-mono">共 {{ groups.length }} 组</span>
+            </div>
             <span class="section-help">点击任意分组即可同时切换整组摄像机画面，支持以组为单位新增与编辑参数</span>
-          </div>
-          <div v-if="activeGroup" class="group-quick-actions">
-            <button class="mini-action-btn" @click="reconnectGroup(activeGroup)">整组重拉流</button>
-            <button class="mini-action-btn" @click="openGroupDialog('edit', activeGroup)">编辑当前组</button>
-            <button class="mini-action-btn danger" @click="removeGroup(activeGroup)">删除当前组</button>
           </div>
         </div>
 
+        <div class="layout-switch">
+          <span class="switch-lbl">视窗布局</span>
+          <div class="segmented">
+            <button :class="['seg-btn', { active: splitMode === 'auto' }]" @click="splitMode = 'auto'">整组自适应</button>
+            <button :class="['seg-btn', { active: splitMode === 1 }]" @click="splitMode = 1">单屏</button>
+            <button :class="['seg-btn', { active: splitMode === 4 }]" @click="splitMode = 4">4分屏</button>
+            <button :class="['seg-btn', { active: splitMode === 9 }]" @click="splitMode = 9">9分屏</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar-bottom">
         <div v-if="groups.length" class="group-tabs-wrap">
           <button
             v-for="grp in groups"
@@ -95,24 +106,36 @@
             :class="['group-tab-btn', { active: activeGroupId === grp.id }]"
             @click="selectGroup(grp.id)"
           >
-            <span class="group-tab-name">{{ grp.name }}</span>
-            <span class="group-tab-count num-mono">{{ grp.cameras.length }} 路</span>
-            <span v-if="grp.isMock" class="group-tab-mock">模拟</span>
-            <span v-if="grp.model || grp.brand" class="group-tab-model">{{ grp.model || grp.brand }}</span>
+            <span :class="['group-tab-dot', { active: activeGroupId === grp.id }]"></span>
+            <div class="group-tab-body">
+              <div class="group-tab-top">
+                <span class="group-tab-name">{{ grp.name }}</span>
+                <span class="group-tab-count num-mono">{{ grp.cameras.length }} 路</span>
+                <span v-if="grp.isMock" class="group-tab-mock">模拟</span>
+              </div>
+              <div v-if="grp.model || grp.brand" class="group-tab-model">
+                {{ grp.model || grp.brand }} · {{ (grp.protocol || 'rtsp').toUpperCase() }}
+              </div>
+            </div>
           </button>
         </div>
         <div v-else class="group-empty-hint">
           暂无水下摄像机分组，请点击「+ 新增分组」创建分组或点击「从台账同步分组」。
         </div>
-      </div>
 
-      <div class="layout-switch">
-        <span class="switch-lbl">视窗布局</span>
-        <div class="segmented">
-          <button :class="['seg-btn', { active: splitMode === 'auto' }]" @click="splitMode = 'auto'">整组自适应</button>
-          <button :class="['seg-btn', { active: splitMode === 1 }]" @click="splitMode = 1">单屏</button>
-          <button :class="['seg-btn', { active: splitMode === 4 }]" @click="splitMode = 4">4分屏</button>
-          <button :class="['seg-btn', { active: splitMode === 9 }]" @click="splitMode = 9">9分屏</button>
+        <div v-if="activeGroup" class="group-quick-actions">
+          <button class="mini-action-btn" @click="reconnectGroup(activeGroup)" title="重新拉取当前分组全部视频流">
+            <el-icon><Refresh /></el-icon>
+            <span>整组重拉流</span>
+          </button>
+          <button class="mini-action-btn" @click="openGroupDialog('edit', activeGroup)" title="编辑当前分组的型号、流参数与机位列表">
+            <el-icon><Edit /></el-icon>
+            <span>编辑当前组</span>
+          </button>
+          <button class="mini-action-btn danger" @click="removeGroup(activeGroup)" title="删除当前水下摄像机分组">
+            <el-icon><Delete /></el-icon>
+            <span>删除当前组</span>
+          </button>
         </div>
       </div>
     </section>
@@ -142,7 +165,8 @@
           <div
             v-for="cam in displayedCameras"
             :key="`${activeGroupId}-${cam.id}`"
-            :class="['cam-viewport', { selected: selectedCamId === cam.id }]"
+            :ref="(el) => setViewportElRef(cam.id, el)"
+            :class="['cam-viewport', { selected: selectedCamId === cam.id, 'is-fullscreen': fullscreenCamId === cam.id }]"
             @click="selectedCamId = cam.id"
           >
             <!-- 视窗 OSD 顶栏 -->
@@ -153,8 +177,8 @@
               <span :class="['status-dot', cam.isReconnecting ? 'warning' : 'online']"></span>
             </div>
 
-            <!-- 视频画面渲染区 -->
-            <div class="cam-feed-area">
+            <!-- 视频画面渲染区（双击可全屏/缩小） -->
+            <div class="cam-feed-area" @dblclick.stop="toggleCamFullscreen(cam)">
               <div v-if="cam.isReconnecting" class="reconnecting-overlay">
                 <el-icon class="is-loading"><Loading /></el-icon>
                 <span>水下视频流重连中...</span>
@@ -224,6 +248,14 @@
               <button class="tool-btn" @click.stop="takeSnapshot(cam)">抓拍</button>
               <button class="tool-btn" @click.stop="triggerPtzPreset(cam)">看位</button>
               <button class="tool-btn" @click.stop="reconnectCam(cam)">重拉流</button>
+              <button
+                :class="['tool-btn', 'tool-btn-fs', { active: fullscreenCamId === cam.id }]"
+                :title="fullscreenCamId === cam.id ? '缩小恢复分屏视窗 (ESC)' : '全屏放大查看当前画面（支持双击画面）'"
+                @click.stop="toggleCamFullscreen(cam)"
+              >
+                <el-icon><ScaleToOriginal v-if="fullscreenCamId === cam.id" /><FullScreen v-else /></el-icon>
+                <span>{{ fullscreenCamId === cam.id ? '缩小' : '全屏' }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -375,7 +407,7 @@
 
         <div class="config-grid-3">
           <el-form-item label="具体型号标注">
-            <el-input v-model="groupForm.model" placeholder="如：海康 DS-2CD 水下机" clearable />
+            <el-input v-model="groupForm.model" placeholder="如：智敏定制专用 水下摄像机" clearable />
           </el-form-item>
           <el-form-item label="网络协议">
             <el-select v-model="groupForm.protocol" style="width: 100%;">
@@ -385,7 +417,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="默认流路径模板">
-            <el-input v-model="groupForm.pathTemplate" placeholder="如 /Streaming/Channels/101" clearable />
+            <el-input v-model="groupForm.pathTemplate" placeholder="如 /stream0" clearable />
           </el-form-item>
         </div>
 
@@ -508,7 +540,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { Loading, Setting, Refresh } from '@element-plus/icons-vue'
+import { Loading, Setting, Refresh, Edit, Delete, FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { api, API_BASE_URL } from '@/services/api'
@@ -565,6 +597,15 @@ const DEMO_UNDERWATER_GROUPS = [
 ]
 
 const BRAND_PRESETS = [
+  {
+    key: 'zhimin',
+    label: '智敏定制专用（RTSP · /stream0）',
+    brand: '智敏定制专用',
+    model: '智敏定制专用 水下摄像机',
+    protocol: 'rtsp',
+    pathTemplate: '/stream0',
+    ptzPort: 1259
+  },
   {
     key: 'hikvision',
     label: '海康威视 Hikvision（RTSP · /Streaming/Channels/101）',
@@ -714,14 +755,20 @@ const parseResolutionKey = (key) => {
 }
 
 const hydrateGroup = (rawGrp, bustCache = false) => {
+  const rawPath = rawGrp.pathTemplate ?? '/stream0'
+  // 兼容旧保存的 /stream0 分组：自动识别为「智敏定制专用」模板
+  const inferredPreset =
+    rawGrp.brandPreset === 'hikvision' && rawPath === '/stream0'
+      ? 'zhimin'
+      : (rawGrp.brandPreset || 'zhimin')
   const grpCfg = {
     id: rawGrp.id || `uw-grp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name: rawGrp.name || '未命名水下分组',
-    brandPreset: rawGrp.brandPreset || 'hikvision',
-    brand: rawGrp.brand || '',
+    brandPreset: inferredPreset,
+    brand: inferredPreset === 'zhimin' ? '智敏定制专用' : (rawGrp.brand || '智敏定制专用'),
     model: rawGrp.model || '',
     protocol: rawGrp.protocol || 'rtsp',
-    pathTemplate: rawGrp.pathTemplate ?? '/Streaming/Channels/101',
+    pathTemplate: rawPath,
     username: rawGrp.username || '',
     password: rawGrp.password || '',
     resolution: rawGrp.resolution || '1920×1080',
@@ -751,33 +798,40 @@ const hydrateGroup = (rawGrp, bustCache = false) => {
   return grpCfg
 }
 
-const saveGroupsToStorage = () => {
+const buildGroupsPayload = () => groups.value.map(g => ({
+  id: g.id,
+  name: g.name,
+  brandPreset: g.brandPreset,
+  brand: g.brand,
+  model: g.model,
+  protocol: g.protocol,
+  pathTemplate: g.pathTemplate,
+  username: g.username,
+  password: g.password,
+  resolution: g.resolution,
+  fps: g.fps,
+  bitrate: g.bitrate,
+  ptzPort: g.ptzPort,
+  isMock: Boolean(g.isMock),
+  cameras: g.cameras.map(c => ({
+    id: c.id,
+    name: c.name,
+    ip: c.ip,
+    customPath: c.customPath || '',
+    depth: c.depth || ''
+  }))
+}))
+
+// pushToServer=true 时把分组变更同步一份到服务端，供其它终端浏览器共享
+const saveGroupsToStorage = (pushToServer = false) => {
+  const payload = buildGroupsPayload()
   try {
-    const payload = groups.value.map(g => ({
-      id: g.id,
-      name: g.name,
-      brandPreset: g.brandPreset,
-      brand: g.brand,
-      model: g.model,
-      protocol: g.protocol,
-      pathTemplate: g.pathTemplate,
-      username: g.username,
-      password: g.password,
-      resolution: g.resolution,
-      fps: g.fps,
-      bitrate: g.bitrate,
-      ptzPort: g.ptzPort,
-      isMock: Boolean(g.isMock),
-      cameras: g.cameras.map(c => ({
-        id: c.id,
-        name: c.name,
-        ip: c.ip,
-        customPath: c.customPath || '',
-        depth: c.depth || ''
-      }))
-    }))
     localStorage.setItem(UNDERWATER_GROUPS_STORAGE_KEY, JSON.stringify(payload))
   } catch { /* ignore */ }
+  if (pushToServer) {
+    // 服务端只共享真实配置的分组，模拟演示分组不上传
+    api.saveUnderwaterGroups({ groups: payload.filter(g => !g.isMock) }).catch(() => {})
+  }
 }
 
 const loadDemoGroups = (showToast = false) => {
@@ -790,21 +844,40 @@ const loadDemoGroups = (showToast = false) => {
   }
 }
 
+// 把分组序列化数组还原为页面可用状态；空数组或非数组返回 false
+const applyGroupsPayload = (parsed) => {
+  if (!Array.isArray(parsed) || parsed.length === 0) return false
+  groups.value = parsed.map(g => hydrateGroup(g))
+  if (groups.value.length) {
+    activeGroupId.value = groups.value[0].id
+    selectedCamId.value = groups.value[0].cameras[0]?.id ?? null
+  }
+  return true
+}
+
 const loadGroupsFromStorage = () => {
   try {
     const raw = localStorage.getItem(UNDERWATER_GROUPS_STORAGE_KEY)
     if (raw === null) return false
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return false
-    groups.value = parsed.map(g => hydrateGroup(g))
-    if (groups.value.length) {
-      activeGroupId.value = groups.value[0].id
-      selectedCamId.value = groups.value[0].cameras[0]?.id ?? null
-    }
-    return true
+    return applyGroupsPayload(JSON.parse(raw))
   } catch {
     return false
   }
+}
+
+// 从服务端共享存储拉取分组（跨终端一致）；后端不可达或尚无配置时返回 false
+const loadGroupsFromServer = async () => {
+  try {
+    const res = await api.underwaterGroups()
+    if (res && !res.__offline && Array.isArray(res.groups) && res.groups.length > 0) {
+      if (applyGroupsPayload(res.groups)) {
+        // 以服务端为准回写本地缓存，保持两端一致
+        try { localStorage.setItem(UNDERWATER_GROUPS_STORAGE_KEY, JSON.stringify(res.groups)) } catch { /* ignore */ }
+        return true
+      }
+    }
+  } catch { /* 后端不可达时回退本地缓存 */ }
+  return false
 }
 
 // 从水下台账 MySQL tb_camera 按 group 字段自动归组导入真实摄像机
@@ -864,7 +937,7 @@ const syncGroupsFromLedger = async (silent = false) => {
     groups.value = imported
     activeGroupId.value = imported[0]?.id || ''
     selectedCamId.value = imported[0]?.cameras[0]?.id ?? null
-    saveGroupsToStorage()
+    saveGroupsToStorage(true)
     if (!silent) {
       ElMessage.success(`已从台账导入 ${imported.length} 个分组、共 ${dbCams.length} 台水下摄像机`)
     }
@@ -942,11 +1015,11 @@ const makeCamRow = (partial = {}) => ({
 
 const groupForm = reactive({
   name: '',
-  brandPreset: 'hikvision',
-  brand: '海康威视',
-  model: '海康威视 水下摄像机',
+  brandPreset: 'zhimin',
+  brand: '智敏定制专用',
+  model: '智敏定制专用 水下摄像机',
   protocol: 'rtsp',
-  pathTemplate: '/Streaming/Channels/101',
+  pathTemplate: '/stream0',
   username: '',
   password: '',
   resolutionKey: '1920×1080@25',
@@ -969,12 +1042,13 @@ const onBrandPresetChange = (key) => {
 
 const loadGroupIntoForm = (grp) => {
   if (!grp) return
+  const validPreset = BRAND_PRESETS.some(p => p.key === grp.brandPreset) ? grp.brandPreset : 'zhimin'
   groupForm.name = grp.name || ''
-  groupForm.brandPreset = grp.brandPreset || 'custom'
-  groupForm.brand = grp.brand || ''
+  groupForm.brandPreset = validPreset
+  groupForm.brand = grp.brand || '智敏定制专用'
   groupForm.model = grp.model || ''
   groupForm.protocol = grp.protocol || 'rtsp'
-  groupForm.pathTemplate = grp.pathTemplate ?? '/Streaming/Channels/101'
+  groupForm.pathTemplate = grp.pathTemplate ?? '/stream0'
   groupForm.username = grp.username || ''
   groupForm.password = grp.password || ''
   groupForm.resolutionKey = `${(grp.resolution || '1920×1080').replace(/x/i, '×')}@${grp.fps || 25}`
@@ -1144,7 +1218,7 @@ const submitGroupForm = () => {
     }
     activeGroupId.value = hydrated.id
     selectedCamId.value = hydrated.cameras[0]?.id ?? null
-    saveGroupsToStorage()
+    saveGroupsToStorage(true)
     groupDialogVisible.value = false
     ElMessage.success(`已保存分组「${hydrated.name}」（共 ${hydrated.cameras.length} 路）并刷新整组画面`)
     return
@@ -1153,7 +1227,7 @@ const submitGroupForm = () => {
   groups.value.push(hydrated)
   activeGroupId.value = hydrated.id
   selectedCamId.value = hydrated.cameras[0]?.id ?? null
-  saveGroupsToStorage()
+  saveGroupsToStorage(true)
   groupDialogVisible.value = false
   ElMessage.success(`已新增分组「${hydrated.name}」（共 ${hydrated.cameras.length} 路）并切换至该组画面`)
 }
@@ -1174,7 +1248,7 @@ const removeGroup = async (grp) => {
     activeGroupId.value = groups.value[0]?.id || ''
     selectedCamId.value = groups.value[0]?.cameras[0]?.id ?? null
   }
-  saveGroupsToStorage()
+  saveGroupsToStorage(true)
   ElMessage.info(`已删除分组「${grp.name}」`)
 }
 
@@ -1276,11 +1350,70 @@ const snapshotAll = () => {
   ElMessage.success(`分组「${activeGroup.value?.name}」一键抓拍完成，已归档 ${count} 张快照！`)
 }
 
-onMounted(() => {
-  const loaded = loadGroupsFromStorage()
-  if (!loaded) {
-    // 无本地分组配置时，默认载入模拟演示分组，便于页面效果预览与开发调试
-    loadDemoGroups(false)
+// ===== 单路视窗全屏 / 缩小 =====
+const viewportElMap = new Map()
+const fullscreenCamId = ref(null)
+
+const setViewportElRef = (camId, el) => {
+  if (el) {
+    viewportElMap.set(camId, el)
+  } else {
+    viewportElMap.delete(camId)
+  }
+}
+
+const exitCamFullscreen = async () => {
+  if (document.fullscreenElement) {
+    try {
+      await document.exitFullscreen()
+    } catch { /* ignore */ }
+  }
+  fullscreenCamId.value = null
+}
+
+const toggleCamFullscreen = async (cam) => {
+  if (!cam) return
+  if (fullscreenCamId.value === cam.id) {
+    await exitCamFullscreen()
+    return
+  }
+  selectedCamId.value = cam.id
+  fullscreenCamId.value = cam.id
+  const el = viewportElMap.get(cam.id)
+  if (el && typeof el.requestFullscreen === 'function') {
+    try {
+      await el.requestFullscreen()
+    } catch {
+      // 原生全屏不可用时自动降级为网页内全屏 (.is-fullscreen)
+    }
+  }
+}
+
+const handleFullscreenChange = () => {
+  if (!document.fullscreenElement) {
+    fullscreenCamId.value = null
+  }
+}
+
+const handleKeydownEsc = (e) => {
+  if (e.key === 'Escape' && fullscreenCamId.value !== null && !document.fullscreenElement) {
+    fullscreenCamId.value = null
+  }
+}
+
+onMounted(async () => {
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
+  window.addEventListener('keydown', handleKeydownEsc)
+  // 优先拉取服务端共享分组（跨终端一致）；后端不可达或尚无配置时回退本地缓存，再回退模拟演示分组
+  const serverLoaded = await loadGroupsFromServer()
+  if (!serverLoaded) {
+    const loaded = loadGroupsFromStorage()
+    if (loaded && groups.value.some(g => !g.isMock)) {
+      // 服务端尚无共享配置：把本终端真实配置的分组上传一次，供其它浏览器共享
+      saveGroupsToStorage(true)
+    } else if (!loaded) {
+      loadDemoGroups(false)
+    }
   }
   liveTime.value = new Date().toLocaleTimeString()
   timer = setInterval(() => {
@@ -1291,6 +1424,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  window.removeEventListener('keydown', handleKeydownEsc)
+  exitCamFullscreen()
   if (timer) clearInterval(timer)
   if (alertPollTimer) clearInterval(alertPollTimer)
 })
@@ -1325,34 +1461,44 @@ h3 { font-size: 15px; line-height: 1.35; }
 .metric-card em { display: block; margin-top: 5px; overflow: hidden; color: var(--do-text-secondary); font-size: 13px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ===== 分组切换与布局工具条 ===== */
-.scene-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 18px; flex-wrap: wrap; }
-.group-bar-main { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 10px; }
-.group-bar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.section-help { display: block; margin-top: 4px; color: var(--do-text-secondary); font-size: 13px; }
-.group-quick-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.mini-action-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--do-border); background: var(--do-bg-sunken); color: var(--do-text-primary); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
-.mini-action-btn:hover { border-color: var(--do-gold); color: var(--do-gold-deep); }
-.mini-action-btn.danger:hover { border-color: var(--do-danger); color: var(--do-danger); }
+.scene-toolbar { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.toolbar-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 18px; background: var(--do-bg-card); flex-wrap: wrap; }
+.toolbar-title-group { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.toolbar-accent-bar { width: 4px; height: 32px; border-radius: 4px; flex-shrink: 0; background: linear-gradient(180deg, var(--do-gold) 0%, var(--do-gold-deep) 100%); box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.25); }
+.toolbar-title-text { display: flex; flex-direction: column; min-width: 0; }
+.toolbar-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar-count-pill { padding: 2px 8px; border-radius: 999px; background: var(--do-gold-wash); border: 1px solid var(--do-border-dark); color: var(--do-gold-deep); font-size: 11.5px; font-weight: 700; line-height: 1.4; }
+.section-help { display: block; margin-top: 3px; color: var(--do-text-secondary); font-size: 12.5px; }
 
-.group-tabs-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.group-tab-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border-radius: 8px; border: 1px solid var(--do-border); background: var(--do-bg-sunken); color: var(--do-text-primary); font-size: 13px; cursor: pointer; transition: all 0.2s ease; }
-.group-tab-btn:hover { border-color: var(--do-gold); color: var(--do-gold-deep); }
-.group-tab-btn.active { background: var(--do-gold); border-color: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 8px rgba(var(--th-accent-rgb), 0.28); }
-.group-tab-name { font-weight: 700; }
-.group-tab-count { padding: 1px 6px; border-radius: 10px; background: rgba(var(--th-shadow-rgb), 0.08); font-size: 12px; font-weight: 700; }
+.toolbar-bottom { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 18px; background: var(--do-bg-sunken); border-top: 1px solid var(--do-border-light); flex-wrap: wrap; }
+.group-tabs-wrap { flex: 1; min-width: 240px; display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+.group-tab-btn { display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 9px; border: 1px solid var(--do-border); background: var(--do-bg-card); color: var(--do-text-primary); text-align: left; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s ease; }
+.group-tab-btn:hover { border-color: var(--do-gold); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.group-tab-btn.active { background: linear-gradient(135deg, var(--do-gold) 0%, var(--do-gold-deep) 100%); border-color: var(--do-gold-deep); color: #FFFFFF; box-shadow: 0 4px 12px rgba(var(--th-accent-rgb), 0.28); }
+.group-tab-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--do-border-dark); transition: all 0.2s ease; }
+.group-tab-dot.active { background: #4ade80; box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.28); }
+.group-tab-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.group-tab-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.group-tab-name { font-size: 13.5px; font-weight: 700; line-height: 1.25; }
+.group-tab-count { padding: 1px 7px; border-radius: 999px; background: var(--do-gold-wash); color: var(--do-gold-deep); font-size: 11.5px; font-weight: 700; line-height: 1.45; }
 .group-tab-btn.active .group-tab-count { background: rgba(255, 255, 255, 0.22); color: #FFFFFF; }
-.group-tab-mock { padding: 1px 5px; border-radius: 4px; background: var(--do-warning-bg); color: var(--do-warning-deep); border: 1px solid var(--do-warning-border); font-size: 11px; font-weight: 700; }
-.group-tab-btn.active .group-tab-mock { background: rgba(255, 255, 255, 0.2); color: #FFFFFF; border-color: rgba(255, 255, 255, 0.38); }
-.group-tab-model { font-size: 12px; color: var(--do-text-secondary); }
-.group-tab-btn.active .group-tab-model { color: rgba(255, 255, 255, 0.88); }
-.group-empty-hint { font-size: 13px; color: var(--do-text-secondary); padding: 4px 0; }
+.group-tab-mock { padding: 1px 6px; border-radius: 4px; background: var(--do-warning-bg); color: var(--do-warning-deep); border: 1px solid var(--do-warning-border); font-size: 11px; font-weight: 700; line-height: 1.35; }
+.group-tab-btn.active .group-tab-mock { background: rgba(255, 255, 255, 0.18); color: #FFFFFF; border-color: rgba(255, 255, 255, 0.36); }
+.group-tab-model { font-size: 11.5px; color: var(--do-text-secondary); line-height: 1.3; }
+.group-tab-btn.active .group-tab-model { color: rgba(255, 255, 255, 0.86); }
+.group-empty-hint { flex: 1; font-size: 13px; color: var(--do-text-secondary); padding: 4px 0; }
+
+.group-quick-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+.mini-action-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--do-border); background: var(--do-bg-card); color: var(--do-text-primary); font-size: 12.5px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow-xs); transition: all 0.2s ease; }
+.mini-action-btn:hover { border-color: var(--do-gold); color: var(--do-gold-deep); background: var(--do-gold-wash); }
+.mini-action-btn.danger:hover { border-color: #fca5a5; color: #dc2626; background: #fef2f2; }
 
 .layout-switch { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.switch-lbl { color: var(--do-text-secondary); font-size: 13px; white-space: nowrap; }
-.segmented { display: flex; gap: 4px; padding: 3px; background: var(--do-bg-sunken); border: 1px solid var(--do-border-light); border-radius: 8px; }
-.seg-btn { padding: 5px 12px; background: transparent; border: none; border-radius: 5px; color: var(--do-text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
+.switch-lbl { color: var(--do-text-secondary); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.segmented { display: flex; gap: 4px; padding: 3px; background: var(--do-bg-sunken); border: 1px solid var(--do-border); border-radius: 8px; }
+.seg-btn { padding: 5px 12px; background: transparent; border: none; border-radius: 6px; color: var(--do-text-secondary); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
 .seg-btn:hover { color: var(--do-gold-deep); }
-.seg-btn.active { background: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.22); }
+.seg-btn.active { background: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.24); }
 
 /* ===== 主布局：视频网格 + 右侧控制栏 ===== */
 .main-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 360px); gap: 14px; align-items: stretch; }
@@ -1373,6 +1519,8 @@ h3 { font-size: 15px; line-height: 1.35; }
 .cam-viewport { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; background: var(--do-bg-dark); border: 1px solid var(--do-border); border-radius: 8px; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
 .cam-viewport:hover { border-color: var(--do-gold); box-shadow: var(--shadow-hover); }
 .cam-viewport.selected { border-color: var(--do-gold); box-shadow: inset 0 0 0 1.5px var(--do-gold), 0 0 0 3px rgba(var(--th-accent-rgb), 0.18); }
+.cam-viewport.is-fullscreen,
+.cam-viewport:fullscreen { position: fixed; inset: 0; z-index: 9999; width: 100vw; height: 100vh; border: none; border-radius: 0; box-shadow: none; background: #000; }
 
 .cam-osd-header { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: rgba(var(--th-shadow-rgb), 0.92); border-bottom: 1px solid rgba(var(--th-accent-rgb), 0.18); flex-shrink: 0; }
 .cam-title { flex: 1; min-width: 0; overflow: hidden; color: var(--do-text-inverse); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -1405,9 +1553,11 @@ h3 { font-size: 15px; line-height: 1.35; }
 
 .reconnecting-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(24, 17, 11, 0.88); color: var(--do-warning); font-size: 13px; font-weight: 600; }
 
-.cam-foot-tools { display: flex; gap: 6px; justify-content: flex-end; padding: 5px 9px; background: rgba(var(--th-shadow-rgb), 0.95); flex-shrink: 0; }
+.cam-foot-tools { display: flex; gap: 6px; justify-content: flex-end; align-items: center; padding: 5px 9px; background: rgba(var(--th-shadow-rgb), 0.95); flex-shrink: 0; }
 .tool-btn { padding: 3px 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(var(--th-accent-rgb), 0.3); border-radius: 4px; color: var(--do-text-inverse); font-size: 12px; cursor: pointer; transition: all 0.2s ease; }
 .tool-btn:hover { background: var(--do-gold); border-color: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.28); }
+.tool-btn-fs { display: inline-flex; align-items: center; gap: 4px; }
+.tool-btn-fs.active { background: var(--do-gold); border-color: var(--do-gold); color: #FFFFFF; box-shadow: 0 2px 6px rgba(var(--th-accent-rgb), 0.32); }
 
 /* ===== 右侧控制栏 ===== */
 .video-side { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -1492,7 +1642,8 @@ h3 { font-size: 15px; line-height: 1.35; }
   .video-grid-container.grid-9 .cam-meta { display: inline; }
 }
 @media (max-width: 900px) {
-  .page-header, .scene-toolbar { align-items: flex-start; flex-direction: column; }
+  .page-header { align-items: flex-start; flex-direction: column; }
+  .toolbar-top, .toolbar-bottom { align-items: flex-start; flex-direction: column; }
   .header-status { justify-content: flex-start; }
   .metric-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .video-grid-container.grid-9 .cam-meta { display: none; }

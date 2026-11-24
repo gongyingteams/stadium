@@ -160,7 +160,7 @@ DEFAULT_MENU_TREE: list[dict[str, Any]] = [
              "requiresAdmin": False, "requiresOps": False, "badgeType": "VIDEO"},
             {"menuKey": "iot-underwater-video", "title": "水下音像采集控制", "shortTitle": "水下采集",
              "path": "/iot/underwater-video", "icon": "SvgCameraMatrix", "visible": True,
-             "requiresAdmin": False, "requiresOps": False, "badgeType": ""},
+             "requiresAdmin": False, "requiresOps": False, "badgeType": "UNDERWATER"},
             {"menuKey": "iot-media", "title": "媒体播控台(背景音乐与视频投屏)", "shortTitle": "媒体播控",
              "path": "/iot/media", "icon": "SvgMediaPlayer", "visible": True,
              "requiresAdmin": False, "requiresOps": False, "badgeType": "MEDIA"},
@@ -337,9 +337,14 @@ def init_db() -> None:
                            (parent_id, menu_type, menu_key, title, short_title, path, icon, visible,
                             sort_order, requires_admin, requires_ops, badge_type, created_at, updated_at, updated_by)
                            VALUES (?, 'ITEM', 'iot-underwater-video', '水下音像采集控制', '水下采集',
-                                   '/iot/underwater-video', 'SvgCameraMatrix', 1, ?, 0, 0, '', ?, ?, 'system')""",
+                                   '/iot/underwater-video', 'SvgCameraMatrix', 1, ?, 0, 0, 'UNDERWATER', ?, ?, 'system')""",
                         (iot_grp[0], insert_order, now_str, now_str),
                     )
+        # 平滑补齐「水下采集」菜单角标类型（已有库的 badge_type 为空时升级一次）
+        connection.execute(
+            "UPDATE sys_menu SET badge_type = 'UNDERWATER' "
+            "WHERE menu_key = 'iot-underwater-video' AND (badge_type IS NULL OR badge_type = '')"
+        )
         # 平滑增加新增字段（应对本地SQLite已有表）
         cols = [c[1] for c in connection.execute("PRAGMA table_info(user_external_apps)").fetchall()]
         if "auth_username" not in cols:

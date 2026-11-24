@@ -399,6 +399,7 @@ import { useThemeStore, THEMES as themes } from '@/stores/theme'
 import { useMenuStore } from '@/stores/menu'
 import { iotDeviceService } from '@/services/iotDeviceService'
 import { systemSettingService } from '@/services/systemSettingService'
+import { api } from '@/services/api'
 import {
   ArrowDown,
   FullScreen,
@@ -470,6 +471,7 @@ const updateClock = () => {
   currentTimeStr.value = `${h}:${m}:${s}`
 }
 let clockTimer = null
+let underwaterBadgeTimer = null
 onMounted(async () => {
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
@@ -477,6 +479,9 @@ onMounted(async () => {
   window.addEventListener('ibms-system-settings-sync', onSettingsSyncState)
   window.addEventListener('ibms-api-status', onApiStatus)
   window.addEventListener('storage', onStorageChange)
+  // 水下采集角标：首次加载 + 每 2 分钟刷新一次服务端分组摄像机总数
+  refreshUnderwaterBadge()
+  underwaterBadgeTimer = setInterval(refreshUnderwaterBadge, 120000)
   // 拉取后端最新菜单树 (后端不可达时 service 内部降级本地缓存)
   try {
     await menuStore.load()
@@ -494,6 +499,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
+  if (underwaterBadgeTimer) clearInterval(underwaterBadgeTimer)
   window.removeEventListener('ibms-system-settings-changed', onSettingsChange)
   window.removeEventListener('ibms-system-settings-sync', onSettingsSyncState)
   window.removeEventListener('ibms-api-status', onApiStatus)
@@ -523,9 +529,25 @@ const menuGroups = computed(() => {
     .filter(g => g.visible !== false && g.children.length > 0)
 })
 
+// 水下采集菜单角标：服务端共享分组中的真实摄像机总数（跨终端一致，后端不可达时不显示）
+const underwaterCamCount = ref(null)
+const refreshUnderwaterBadge = async () => {
+  try {
+    const res = await api.underwaterGroups()
+    if (res && !res.__offline && Array.isArray(res.groups)) {
+      underwaterCamCount.value = res.groups.reduce(
+        (sum, g) => sum + (Array.isArray(g.cameras) ? g.cameras.length : 0), 0
+      )
+    }
+  } catch { /* 后端不可达时角标缺失，不阻塞布局渲染 */ }
+}
+
 // 动态计算菜单项右侧的设备数量 Badge (由菜单配置的 badgeType 驱动: 硬件类型或全场总数)
 const getMenuItemBadge = (sub) => {
   const badgeType = sub.badgeType
+  if (badgeType === 'UNDERWATER') {
+    return underwaterCamCount.value != null ? `${underwaterCamCount.value}` : null
+  }
   if (badgeType && badgeType !== 'TOTAL') {
     try {
       const list = iotDeviceService.getDevices(badgeType)

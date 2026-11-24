@@ -408,6 +408,11 @@ export const api = {
   }),
   // 水下影像采集识别台账（MySQL 参数可配置）
   underwaterLedger: (alertLimit = 50) => request(`/video/underwater/ledger?alert_limit=${alertLimit}`),
+  underwaterGroups: () => request('/video/underwater/groups'),
+  saveUnderwaterGroups: (payload) => request('/video/underwater/groups', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
   underwaterAlertImage: (alertId) => request(`/video/underwater/alert-image/${alertId}`),
   getUnderwaterDbConfig: () => request('/video/underwater/db-config'),
   saveUnderwaterDbConfig: (payload) => request('/video/underwater/db-config', {
@@ -418,6 +423,22 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+  // 视频源探测（RTSP/VMix 端口连通性与参数读取）
+  videoProbe: (payload) => request('/video/probe', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  // 视频回放数据源（局域网 SMB 共享盘）
+  videoReplayConfig: () => request('/video/replay/config'),
+  saveVideoReplayConfig: (payload) => request('/video/replay/config', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  testVideoReplayConfig: (payload) => request('/video/replay/config/test', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  listVideoReplayFiles: (path = '') => request(`/video/replay/files?path=${encodeURIComponent(path)}`),
   videoPtz: (payload) => request('/video/ptz', {
     method: 'POST',
     body: JSON.stringify(payload)

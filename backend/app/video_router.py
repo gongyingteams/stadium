@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -28,6 +28,11 @@ try:
     import pymysql  # type: ignore
 except Exception:  # pragma: no cover
     pymysql = None  # type: ignore
+
+try:
+    import smbclient  # type: ignore
+except Exception:  # pragma: no cover
+    smbclient = None  # type: ignore
 
 DEFAULT_UNDERWATER_DB_CFG: dict[str, Any] = {
     "host": "192.168.0.33",
@@ -42,6 +47,8 @@ router = APIRouter(prefix="/api/video", tags=["video"])
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 UNDERWATER_DB_CFG_FILE = ROOT_DIR / "backend" / "data" / "underwater_db_config.json"
+UNDERWATER_GROUPS_FILE = ROOT_DIR / "backend" / "data" / "underwater_groups.json"
+VIDEO_REPLAY_CFG_FILE = ROOT_DIR / "backend" / "data" / "video_replay_config.json"
 SNAPSHOT_DIR = ROOT_DIR / "public" / "uploads" / "snapshots"
 SNAPSHOT_META_FILE = SNAPSHOT_DIR / "index.json"
 _LATEST_FRAMES: dict[str, tuple[float, bytes]] = {}
@@ -401,6 +408,362 @@ def test_underwater_db_config(body: UnderwaterDbConfigRequest) -> dict[str, Any]
         return {"ok": False, "message": f"数据库查询异常：{exc}"}
     finally:
         conn.close()
+
+
+# ===== 水下摄像机分组的服务端持久化（跨终端浏览器共享配置） =====
+
+def _sanitize_underwater_groups(payload: Any) -> list[dict[str, Any]] | None:
+    """清洗并校验前端提交的水下摄像机分组数据，剔除脏字段并约束体积。
+
+    返回 None 表示结构非法；返回空列表表示合法的"无分组"。
+    """
+    if not isinstance(payload, dict):
+        return None
+    groups = payload.get("groups")
+    if not isinstance(groups, list):
+        return None
+    cleaned: list[dict[str, Any]] = []
+    for g in groups:
+        if not isinstance(g, dict) or len(cleaned) >= 40:
+            continue
+        cams_raw = g.get("cameras") if isinstance(g.get("cameras"), list) else []
+        cams: list[dict[str, Any]] = []
+        for c in cams_raw:
+            if not isinstance(c, dict) or len(cams) >= 60:
+                continue
+            cams.append({
+                "id": str(c.get("id") or "")[:64],
+                "name": str(c.get("name") or "")[:128],
+                "ip": str(c.get("ip") or "")[:256],
+                "customPath": str(c.get("customPath") or "")[:128],
+                "depth": str(c.get("depth") or "")[:32],
+            })
+        try:
+            fps = int(g.get("fps")) if g.get("fps") is not None else 25
+        except (TypeError, ValueError):
+            fps = 25
+        try:
+            ptz_port = int(g.get("ptzPort")) if g.get("ptzPort") is not None else 1259
+        except (TypeError, ValueError):
+            ptz_port = 1259
+        cleaned.append({
+            "id": str(g.get("id") or "")[:64],
+            "name": str(g.get("name") or "未命名水下分组")[:64],
+            "brandPreset": str(g.get("brandPreset") or "hikvision")[:32],
+            "brand": str(g.get("brand") or "")[:64],
+            "model": str(g.get("model") or "")[:128],
+            "protocol": str(g.get("protocol") or "rtsp")[:16],
+            "pathTemplate": str(g.get("pathTemplate") or "/Streaming/Channels/101")[:128],
+            "username": str(g.get("username") or "")[:64],
+            "password": str(g.get("password") or "")[:128],
+            "resolution": str(g.get("resolution") or "1920×1080")[:32],
+            "fps": max(1, min(120, fps)),
+            "bitrate": str(g.get("bitrate") or "6 Mbps")[:32],
+            "ptzPort": max(1, min(65535, ptz_port)),
+            "isMock": bool(g.get("isMock")),
+            "cameras": cams,
+        })
+    return cleaned
+
+
+@router.get("/underwater/groups")
+def get_underwater_groups() -> dict[str, Any]:
+    """读取服务端持久化的水下摄像机分组配置（各终端浏览器拉取后保持一致）。"""
+    if UNDERWATER_GROUPS_FILE.exists():
+        try:
+            data = json.loads(UNDERWATER_GROUPS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("groups"), list):
+                return {
+                    "ok": True,
+                    "groups": data["groups"],
+                    "updatedAt": str(data.get("updatedAt") or ""),
+                    "updatedBy": str(data.get("updatedBy") or ""),
+                }
+        except Exception:
+            pass
+    return {"ok": True, "groups": [], "updatedAt": "", "updatedBy": ""}
+
+
+@router.post("/underwater/groups")
+def save_underwater_groups(body: dict[str, Any]) -> dict[str, Any]:
+    """保存水下摄像机分组配置至服务端（localStorage 之外的服务端共享副本）。"""
+    cleaned = _sanitize_underwater_groups(body)
+    if cleaned is None:
+        raise HTTPException(status_code=400, detail="分组数据格式无效：缺少有效的 groups 数组")
+    payload = {
+        "groups": cleaned,
+        "updatedAt": datetime.now().isoformat(timespec="seconds"),
+        "updatedBy": "web",
+    }
+    try:
+        UNDERWATER_GROUPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        UNDERWATER_GROUPS_FILE.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"服务端持久化失败：{exc}") from exc
+    return {
+        "ok": True,
+        "message": f"已保存 {len(cleaned)} 个水下摄像机分组至服务器",
+        "groups": cleaned,
+        "updatedAt": payload["updatedAt"],
+        "updatedBy": payload["updatedBy"],
+    }
+
+
+# ===== 视频回放数据源（局域网 SMB 共享盘，可配置主机 / 共享名 / 凭据） =====
+
+DEFAULT_VIDEO_REPLAY_CFG: dict[str, Any] = {
+    "host": "192.168.0.33",
+    "port": 445,
+    "share": "",
+    "rootPath": "",
+    "username": "",
+    "password": "",
+}
+
+VIDEO_FILE_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".wmv", ".flv", ".m4v", ".ts",
+                   ".webm", ".mpg", ".mpeg", ".rmvb"}
+
+VIDEO_MIME_MAP: dict[str, str] = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo", ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv", ".ts": "video/mp2t",
+    ".mpg": "video/mpeg", ".mpeg": "video/mpeg",
+    ".rmvb": "application/vnd.rn-realmedia-vbr",
+}
+
+
+class VideoReplayConfigRequest(BaseModel):
+    host: str = ""
+    port: int = 445
+    share: str = ""
+    rootPath: str = ""
+    username: str = ""
+    password: str = ""
+    keepPassword: bool = True
+
+
+def _load_replay_cfg() -> dict[str, Any]:
+    cfg = dict(DEFAULT_VIDEO_REPLAY_CFG)
+    if VIDEO_REPLAY_CFG_FILE.exists():
+        try:
+            saved = json.loads(VIDEO_REPLAY_CFG_FILE.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                for k in cfg:
+                    if saved.get(k) is not None:
+                        cfg[k] = saved[k]
+        except Exception:
+            pass
+    return cfg
+
+
+def _public_replay_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "host": str(cfg.get("host") or ""),
+        "port": int(cfg.get("port") or 445),
+        "share": str(cfg.get("share") or ""),
+        "rootPath": str(cfg.get("rootPath") or ""),
+        "username": str(cfg.get("username") or ""),
+        "hasPassword": bool(cfg.get("password")),
+    }
+
+
+def _resolve_replay_cfg_from_request(body: VideoReplayConfigRequest) -> dict[str, Any]:
+    host = (body.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="请填写共享主机 IP 或域名")
+    port = int(body.port or 445)
+    if port < 1 or port > 65535:
+        raise HTTPException(status_code=400, detail="SMB 端口必须在 1~65535 之间")
+    current = _load_replay_cfg()
+    password = body.password if (body.password != "" or not body.keepPassword) else current.get("password", "")
+    return {
+        "host": host,
+        "port": port,
+        "share": (body.share or "").strip().replace("/", "\\").strip("\\"),
+        "rootPath": (body.rootPath or "").strip().replace("/", "\\").strip("\\"),
+        "username": (body.username or "").strip(),
+        "password": password,
+    }
+
+
+def _replay_unc(cfg: dict[str, Any], rel: str = "") -> str:
+    host = str(cfg.get("host") or "").strip()
+    share = str(cfg.get("share") or "").strip().replace("/", "\\").strip("\\")
+    root = str(cfg.get("rootPath") or "").strip().replace("/", "\\").strip("\\")
+    if not host:
+        raise HTTPException(status_code=400, detail="尚未配置视频回放数据源主机")
+    parts = [f"\\\\{host}"]
+    if share:
+        parts.append(share)
+    if root:
+        parts.append(root)
+    base = "\\".join(parts)
+    rel = (rel or "").strip().replace("/", "\\").strip("\\")
+    if not rel:
+        return base
+    segs = [s for s in rel.split("\\") if s not in ("", ".")]
+    if any(s == ".." for s in segs):
+        raise HTTPException(status_code=400, detail="非法路径：不允许引用上级目录")
+    return base + "\\" + "\\".join(segs)
+
+
+def _replay_session(cfg: dict[str, Any]) -> None:
+    if smbclient is None:
+        raise HTTPException(status_code=500, detail="服务器未安装 smbprotocol 依赖，无法访问 SMB 共享")
+    host = str(cfg.get("host") or "").strip()
+    user = str(cfg.get("username") or "").strip() or None
+    pwd = str(cfg.get("password") or "") or None
+    try:
+        smbclient.register_session(
+            host,
+            username=user,
+            password=pwd,
+            port=int(cfg.get("port") or 445),
+            connection_timeout=8,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"连接 SMB 共享主机失败（{host}）：{exc}") from exc
+
+
+@router.get("/replay/config")
+def get_video_replay_config() -> dict[str, Any]:
+    cfg = _load_replay_cfg()
+    return {"ok": True, "config": _public_replay_cfg(cfg)}
+
+
+@router.post("/replay/config")
+def save_video_replay_config(body: VideoReplayConfigRequest) -> dict[str, Any]:
+    cfg = _resolve_replay_cfg_from_request(body)
+    VIDEO_REPLAY_CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    VIDEO_REPLAY_CFG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 配置变更后清理旧的 SMB 会话缓存，避免沿用旧凭据 / 旧主机连接
+    if smbclient is not None:
+        try:
+            smbclient.delete_session(cfg["host"], port=cfg["port"])
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "message": f"已保存视频回放数据源配置（{cfg['host']}:{cfg['port']}）",
+        "config": _public_replay_cfg(cfg),
+    }
+
+
+@router.post("/replay/config/test")
+def test_video_replay_config(body: VideoReplayConfigRequest) -> dict[str, Any]:
+    cfg = _resolve_replay_cfg_from_request(body)
+    if not cfg.get("share"):
+        return {"ok": False, "message": "请填写共享名（如共享盘符对应的共享名称）"}
+    try:
+        _replay_session(cfg)
+        unc = _replay_unc(cfg)
+        with smbclient.scandir(unc) as it:
+            entries = list(it)
+        dir_count = sum(1 for e in entries if e.is_dir())
+        video_count = sum(1 for e in entries if e.is_file() and str(Path(e.name).suffix).lower() in VIDEO_FILE_EXTS)
+        return {
+            "ok": True,
+            "message": (f"连接成功！{cfg['host']} 共享「{cfg['share']}」："
+                        f"{dir_count} 个子目录、本层 {video_count} 个视频文件"),
+            "dirCount": dir_count,
+            "videoCount": video_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"ok": False, "message": f"访问共享失败：{exc}"}
+
+
+@router.get("/replay/files")
+def list_video_replay_files(path: str = Query("")) -> dict[str, Any]:
+    """列出共享目录下的子目录与文件（标记视频类型），供前端浏览选择回放。"""
+    cfg = _load_replay_cfg()
+    if not str(cfg.get("host") or "").strip() or not str(cfg.get("share") or "").strip():
+        return {"ok": False, "entries": [], "videoCount": 0, "path": path,
+                "error": "尚未配置视频回放数据源（主机 / 共享名）"}
+    unc = _replay_unc(cfg, path)
+    _replay_session(cfg)
+    try:
+        entries: list[dict[str, Any]] = []
+        with smbclient.scandir(unc) as it:
+            for e in it:
+                is_dir = e.is_dir()
+                try:
+                    st = e.stat()
+                    size = int(getattr(st, "st_size", 0) or 0)
+                    mtime_ts = getattr(st, "st_mtime", None)
+                    mtime = datetime.fromtimestamp(mtime_ts).strftime("%Y-%m-%d %H:%M") if mtime_ts else ""
+                except Exception:
+                    size, mtime = 0, ""
+                entries.append({
+                    "name": e.name,
+                    "isDir": is_dir,
+                    "size": 0 if is_dir else size,
+                    "mtime": mtime,
+                    "isVideo": (not is_dir) and str(Path(e.name).suffix).lower() in VIDEO_FILE_EXTS,
+                })
+        entries.sort(key=lambda x: (not x["isDir"], x["name"].lower()))
+        video_count = sum(1 for x in entries if x["isVideo"])
+        return {"ok": True, "path": path, "entries": entries, "videoCount": video_count}
+    except Exception as exc:
+        return {"ok": False, "entries": [], "videoCount": 0, "path": path,
+                "error": f"读取共享目录失败：{exc}"}
+
+
+@router.get("/replay/file")
+def stream_video_replay_file(path: str = Query(..., min_length=1), request: Request = None) -> Response:
+    """以 HTTP Range 分段方式回放共享盘上的视频文件（支持拖动进度条）。"""
+    cfg = _load_replay_cfg()
+    if not str(cfg.get("host") or "").strip() or not str(cfg.get("share") or "").strip():
+        raise HTTPException(status_code=400, detail="尚未配置视频回放数据源（主机 / 共享名）")
+    unc = _replay_unc(cfg, path)
+    if str(Path(unc).suffix).lower() not in VIDEO_FILE_EXTS:
+        raise HTTPException(status_code=400, detail="仅允许回放视频类型文件")
+    _replay_session(cfg)
+    try:
+        st = smbclient.stat(unc)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"共享文件不存在或无权访问：{exc}") from exc
+    size = int(getattr(st, "st_size", 0) or 0)
+    start, end = 0, max(size - 1, 0)
+    range_hdr = request.headers.get("range") if request is not None else None
+    if range_hdr and range_hdr.startswith("bytes="):
+        spec = range_hdr[6:].split(",")[0].strip()
+        s, _, e = spec.partition("-")
+        try:
+            start = int(s) if s else 0
+            end = int(e) if e else size - 1
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无效的 Range 请求头") from None
+        if size and (start >= size or start > end):
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    chunk = 1024 * 512  # 每次读取 512KB，平衡 SMB 吞吐与内存占用
+
+    def _iter_chunks():
+        with smbclient.open_file(unc, mode="rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                data = f.read(min(chunk, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        _iter_chunks(),
+        status_code=206,
+        media_type=VIDEO_MIME_MAP.get(str(Path(unc).suffix).lower(), "application/octet-stream"),
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(end - start + 1),
+        },
+    )
 
 
 @router.get("/underwater/ledger")
